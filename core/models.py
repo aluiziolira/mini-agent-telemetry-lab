@@ -93,6 +93,22 @@ class Evaluation(models.Model):
         return str(self.trace_id)
 
 
+class MetricCounter(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    value = models.BigIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(value__gte=0),
+                name="metric_counter_value_non_negative",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class IdempotencyKey(models.Model):
     key = models.CharField(max_length=255, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
