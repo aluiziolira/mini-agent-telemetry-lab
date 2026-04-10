@@ -96,25 +96,31 @@ status:
 # 🎯 DEMO & TESTING (Generate Telemetry Data)
 # =============================================================================
 
-# Run complete demonstration: both agents + evaluations + verification
+# Run complete demonstration: all demo agents + evaluations + verification
 demo:
     @echo ""
     @echo "🎬 RUNNING COMPLETE DEMO WORKFLOW"
     @echo "=================================="
     @echo ""
-    @echo "Step 1/4: Running research_analyst agent (with live tools)..."
+    @echo "Step 1/7: Running research_analyst agent (with live tools)..."
     just agent
     @echo ""
-    @echo "Step 2/4: Running raw_sdk_briefing_agent (rule-based)..."
+    @echo "Step 2/7: Running research_analyst_msft agent (with live tools)..."
+    just agent-msft
+    @echo ""
+    @echo "Step 3/7: Running raw_sdk_briefing_agent (rule-based)..."
     just raw-agent
     @echo ""
-    @echo "Step 3/4: Processing evaluations via Huey worker..."
+    @echo "Step 4/7: Running raw_sdk_technical_explainer_agent (rule-based)..."
+    just raw-agent-technical
+    @echo ""
+    @echo "Step 5/7: Processing evaluations via Huey worker..."
     just eval-pipeline
     @echo ""
-    @echo "Step 4/5: Verifying data integrity..."
+    @echo "Step 6/7: Verifying data integrity..."
     just verify
     @echo ""
-    @echo "Step 5/5: Surfacing live execution metrics..."
+    @echo "Step 7/7: Surfacing live execution metrics..."
     just demo-summary
     @echo ""
     @echo "✅ Demo complete! View results at:"
@@ -124,9 +130,17 @@ demo:
 agent:
     PYTHONPATH=. uv run python scripts/demo_agent.py "Should I buy AAPL?"
 
+# Run research_analyst_msft agent (real LLM + stock data + web search)
+agent-msft:
+    PYTHONPATH=. uv run python scripts/demo_agent_msft.py "Should I buy MSFT?"
+
 # Run raw_sdk_briefing_agent (rule-based, no external APIs)
 raw-agent:
     PYTHONPATH=. uv run python scripts/raw_sdk_agent.py "Show how a raw Python agent can share the telemetry tracer."
+
+# Run raw_sdk_technical_explainer_agent (rule-based, technical question)
+raw-agent-technical:
+    PYTHONPATH=. uv run python scripts/raw_sdk_technical_agent.py "How does Python's event loop schedule coroutines during high I/O workloads?"
 
 
 # =============================================================================
@@ -154,7 +168,7 @@ verify:
 # Summarize recent completed runs with recruiter-friendly execution evidence
 demo-summary:
     @echo "🎯 Summarizing the latest demo runs..."
-    uv run python manage.py demo_summary --limit 2
+    uv run python manage.py demo_summary --limit 4
 
 # Surface the strongest README proof points through focused tests
 proof:
