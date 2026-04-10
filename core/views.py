@@ -1,6 +1,8 @@
+import json
 from decimal import Decimal
 
 from django.conf import settings
+from django.views.generic import DetailView, ListView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -59,3 +61,70 @@ class IngestSpanView(APIView):
         return Response(response_data, status=201)
 
 
+def build_span_tree(spans):
+    span_map = {
+        str(span.span_id): {
+            "span": span,
+            "children": [],
+            "duration_ms": (span.end_time - span.start_time).total_seconds() * 1000,
+            "attributes_json": json.dumps(span.attributes, indent=2, sort_keys=True),
+        }
+        for span in spans
+    }
+    roots = []
+    for item in span_map.values():
+        pid = str(item["span"].parent_span_id) if item["span"].parent_span_id else None
+        if pid and pid in span_map:
+            span_map[pid]["children"].append(item)
+        else:
+            roots.append(item)
+    return roots
+
+
+def latency_ms(start_time, end_time):
+    if not end_time:
+        return None
+    return (end_time - start_time).total_seconds() * 1000
+
+
+class RunListView(ListView):
+    model = Run
+    template_name = "core/run_list.html"
+    context_object_name = "runs"
+
+    def get_queryset(self):
+        sort = self.request.GET.get("sort", "-start_time")
+        allowed = [
+            "start_time",
+            "-start_time",
+            "total_cost",
+            "-total_cost",
+            "eval_score",
+            "-eval_score",
+        ]
+        if sort not in allowed:
+            sort = "-start_time"
+        return Run.objects.select_related("evaluation").order_by(sort)
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["run_rows"] = [
+            {"run": run, "latency_ms": latency_ms(run.start_time, run.end_time)}
+            for run in ctx["runs"]
+        ]
+        return ctx
+
+
+class RunDetailView(DetailView):
+    model = Run
+    template_name = "core/run_detail.html"
+    pk_url_kwarg = "trace_id"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        spans = list(self.object.spans.order_by("start_time"))
+        ctx["span_tree"] = build_span_tree(spans)
+        ctx["span_count"] = len(spans)
+        ctx["evaluation"] = getattr(self.object, "evaluation", None)
+        ctx["run_latency_ms"] = latency_ms(self.object.start_time, self.object.end_time)
+        return ctx
