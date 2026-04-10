@@ -105,7 +105,9 @@ def test_metrics_endpoint_persists_span_ingestion_count(client, settings):
     assert metrics_response.status_code == 200
     assert metrics_response["Content-Type"] == "text/plain; charset=utf-8"
     assert "spans_ingested_total 4" in metrics_response.content.decode()
+    assert "eval_tasks_started_total 0" in metrics_response.content.decode()
     assert "eval_tasks_completed_total 0" in metrics_response.content.decode()
+    assert "eval_tasks_failed_total 0" in metrics_response.content.decode()
 
 
 @pytest.mark.django_db
@@ -158,14 +160,20 @@ def test_metrics_endpoint_reflects_completed_evaluations(client):
 
         evaluate_run.call_local(str(run.trace_id))
 
+    assert MetricCounter.objects.get(name="eval_tasks_started_total").value == 1
     assert MetricCounter.objects.get(name="eval_tasks_completed_total").value == 1
+    assert MetricCounter.objects.get(name="eval_tasks_failed_total").value == 0
     assert MetricCounter.objects.get(name="spans_ingested_total").value == 0
 
     metrics_text = metrics.get_prometheus_text()
 
     assert "spans_ingested_total 0" in metrics_text
+    assert "eval_tasks_started_total 1" in metrics_text
     assert "eval_tasks_completed_total 1" in metrics_text
+    assert "eval_tasks_failed_total 0" in metrics_text
 
     metrics_response = client.get(reverse("metrics"))
     assert metrics_response.status_code == 200
+    assert "eval_tasks_started_total 1" in metrics_response.content.decode()
     assert "eval_tasks_completed_total 1" in metrics_response.content.decode()
+    assert "eval_tasks_failed_total 0" in metrics_response.content.decode()
