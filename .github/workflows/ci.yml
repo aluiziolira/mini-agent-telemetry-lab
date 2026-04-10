@@ -8,6 +8,9 @@ on:
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -15,9 +18,25 @@ jobs:
           fetch-depth: 0
 
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -w /repo \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            ghcr.io/gitleaks/gitleaks:v8.24.2 \
+            git . \
+            --config .gitleaks.toml \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --exit-code 1
+
+      - name: Upload Gitleaks SARIF
+        if: ${{ always() && hashFiles('gitleaks.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
 
   lint-and-test:
     runs-on: ubuntu-latest
