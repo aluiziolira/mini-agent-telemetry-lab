@@ -268,7 +268,8 @@ class HealthCheckView(APIView):
 
 class MetricsView(APIView):
     def get(self, request):
-        return Response(
+        from django.http import HttpResponse
+        return HttpResponse(
             metrics.get_prometheus_text(),
             content_type="text/plain; charset=utf-8",
         )
