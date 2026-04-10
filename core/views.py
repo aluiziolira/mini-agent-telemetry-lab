@@ -4,13 +4,10 @@ import logging
 import time
 import uuid as uuid_module
 from collections import defaultdict
-from datetime import timedelta
-from decimal import Decimal
 
 from django.conf import settings
-from django.db import IntegrityError, connection
+from django.db import connection
 from django.http import HttpResponse
-from django.utils import timezone
 from django.views.generic import DetailView, ListView
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -18,9 +15,16 @@ from rest_framework.views import APIView
 from core.hooks import run_hook
 from core.metrics import metrics
 from core.middleware.request_id import get_current_request_id
-from core.models import IdempotencyKey, Run, Span
+from core.models import Run
 from core.serializers import SpanIngestSerializer
-from core.validators import ValidationError, validate_span_attributes
+from core.services.exceptions import (
+    CompletedRunConflictError,
+    IdempotentDuplicateError,
+    ParentSpanNotFoundError,
+    SpanAlreadyExistsError,
+)
+from core.services.ingestion import ingest_span
+from core.validators import ValidationError
 
 logger = logging.getLogger("telemetry_lab")
 
@@ -61,9 +65,6 @@ class IngestSpanView(APIView):
             )
 
         idempotency_key = request.headers.get("Idempotency-Key")
-        if idempotency_key:
-            if IdempotencyKey.objects.filter(key=idempotency_key).exists():
-                return Response({"span_id": "duplicate"}, status=200)
 
         serializer = SpanIngestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -71,95 +72,40 @@ class IngestSpanView(APIView):
         data = serializer.validated_data
 
         try:
-            validate_span_attributes(data.get("span_type"), data.get("attributes", {}))
+            result = ingest_span(
+                data=data,
+                idempotency_key=idempotency_key,
+                post_ingest_hook=run_hook,
+            )
+        except IdempotentDuplicateError:
+            return Response({"span_id": "duplicate"}, status=200)
+        except ParentSpanNotFoundError:
+            return Response({"error": "parent_span_id not found in trace"}, status=400)
+        except SpanAlreadyExistsError:
+            return Response({"error": "span_id already exists"}, status=400)
+        except CompletedRunConflictError:
+            return Response({"error": "run already completed"}, status=409)
         except ValidationError as e:
             return Response({"error": str(e)}, status=400)
-
-        now = timezone.now()
-        future_threshold = now + timedelta(minutes=1)
-        past_threshold = now - timedelta(hours=24)
-
-        if data["start_time"] > future_threshold:
-            return Response({"error": "start_time too far in future"}, status=400)
-        if data["end_time"] > future_threshold:
-            return Response({"error": "end_time too far in future"}, status=400)
-        if data["start_time"] < past_threshold:
-            return Response({"error": "start_time too old"}, status=400)
-        if data["end_time"] < past_threshold:
-            return Response({"error": "end_time too old"}, status=400)
-
-        if data.get("parent_span_id"):
-            parent_exists = Span.objects.filter(
-                trace_id__trace_id=data["trace_id"],
-                span_id=data["parent_span_id"],
-            ).exists()
-            if not parent_exists:
-                return Response({"error": "parent_span_id not found in trace"}, status=400)
-
-        if idempotency_key:
-            IdempotencyKey.objects.create(key=idempotency_key)
-
-        run, _ = Run.objects.get_or_create(
-            trace_id=data["trace_id"],
-            defaults={
-                "agent_name": data.get("agent_name", "unknown"),
-                "status": "running",
-                "start_time": data["start_time"],
-            },
-        )
-
-        try:
-            span = Span.objects.create(
-                span_id=data["span_id"],
-                trace_id=run,
-                parent_span_id=data.get("parent_span_id"),
-                span_type=data["span_type"],
-                name=data["name"],
-                start_time=data["start_time"],
-                end_time=data["end_time"],
-                status_code=data["status_code"],
-                attributes=data.get("attributes", {}),
-            )
-        except IntegrityError:
-            return Response({"error": "span_id already exists"}, status=400)
-
-        run_hook(
-            "post_ingest",
-            {"span_id": str(span.span_id), "trace_id": str(data["trace_id"])},
-        )
-
-        metrics.increment_spans_ingested()
         logger.info(
             "Span ingested",
             extra={
                 "trace_id": str(data["trace_id"]),
-                "span_id": str(data["span_id"]),
+                "span_id": result["span_id"],
                 "request_id": get_current_request_id(),
                 "extra_fields": {"span_type": data["span_type"]},
             },
         )
 
-        response_data = {"span_id": str(span.span_id)}
-
-        if data.get("is_final"):
-            spans = Span.objects.filter(trace_id=run)
-            total_tokens = sum(
-                s.attributes.get("prompt_tokens", 0) + s.attributes.get("completion_tokens", 0)
-                for s in spans
-            )
-            total_cost = Decimal(total_tokens) * Decimal("0.000002")
-            run.status = "completed"
-            run.end_time = data["end_time"]
-            run.total_tokens = total_tokens
-            run.total_cost = total_cost
-            run.save()
+        response_data = {"span_id": result["span_id"]}
+        if result["run_completed"]:
             response_data["run_status"] = "completed"
 
         request_id = get_current_request_id() or str(uuid_module.uuid4())
         return Response(
             response_data,
             status=201,
-            headers={"X-Request-ID": request_id, "X-Span-ID": str(span.span_id)},
+            headers={"X-Request-ID": request_id, "X-Span-ID": result["span_id"]},
         )
 
 

@@ -1,0 +1,25 @@
+from decimal import Decimal
+
+from core.models import Run, Span
+
+
+def finalize_run_if_needed(*, run: Run, is_final: bool, end_time):
+    if not is_final:
+        return False
+
+    if run.status == "completed":
+        return True
+
+    spans = Span.objects.filter(trace_id=run)
+    total_tokens = sum(
+        span.attributes.get("prompt_tokens", 0) + span.attributes.get("completion_tokens", 0)
+        for span in spans
+    )
+    total_cost = Decimal(total_tokens) * Decimal("0.000002")
+
+    run.status = "completed"
+    run.end_time = end_time
+    run.total_tokens = total_tokens
+    run.total_cost = total_cost
+    run.save(update_fields=["status", "end_time", "total_tokens", "total_cost"])
+    return True
