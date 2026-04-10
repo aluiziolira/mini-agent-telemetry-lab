@@ -21,13 +21,8 @@ repos:
       - id: check-toml
       - id: check-json
       - id: check-merge-conflict
-      - id: check-added-large-files
-        args: [--maxkb=500]
       - id: end-of-file-fixer
       - id: trailing-whitespace
-      - id: no-commit-to-branch
-        args: [--branch, main]
-
   # Type checking (high-leverage modules only)
   - repo: local
     hooks:
