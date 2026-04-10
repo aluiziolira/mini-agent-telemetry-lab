@@ -6,11 +6,13 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 SETTINGS_SCRIPT = textwrap.dedent(
     """
     import importlib
@@ -87,6 +89,14 @@ def test_pytest_safe_settings_bootstrap_imports_without_local_env():
 
     assert result["ok"] is True
     assert result["EVAL_LLM_PROVIDER"] == "openai"
+
+
+def test_mypy_django_stubs_uses_pytest_safe_settings_module():
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+
+    assert (
+        pyproject["tool"]["django-stubs"]["django_settings_module"] == "telemetry_lab.test_settings"
+    )
 
 
 @pytest.mark.parametrize(

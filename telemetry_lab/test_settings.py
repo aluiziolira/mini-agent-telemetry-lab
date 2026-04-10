@@ -7,6 +7,7 @@ import Django settings without depending on a developer-local .env file.
 import importlib
 import os
 from pathlib import Path
+from typing import Any, cast
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -17,7 +18,12 @@ os.environ.setdefault("LLM_API_KEY", "pytest-llm-key")
 os.environ.setdefault("EVAL_LLM_PROVIDER", "openai")
 os.environ.setdefault("DEBUG", "True")
 
-_settings = importlib.import_module("telemetry_lab.settings")
+_settings = cast(Any, importlib.import_module("telemetry_lab.settings"))
+
+# Make custom settings explicit so django-stubs can type django.conf.settings in CI.
+INGEST_API_KEY: str = _settings.INGEST_API_KEY
+EVAL_LLM_PROVIDER: str = _settings.EVAL_LLM_PROVIDER
+LLM_API_KEY: str = _settings.LLM_API_KEY
 
 # Keep test runs independent from a live PostgreSQL instance.
 _settings.HUEY = {

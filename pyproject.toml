@@ -76,4 +76,4 @@ module = ["huey.*", "huey.contrib.djhuey"]
 ignore_missing_imports = true
 
 [tool.django-stubs]
-django_settings_module = "telemetry_lab.settings"
+django_settings_module = "telemetry_lab.test_settings"
