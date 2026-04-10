@@ -1,9 +1,18 @@
 [project]
 name = "mini-agent-telemetry-lab"
 version = "0.1.0"
-description = "Add your description here"
+description = "A backend observability system that turns opaque LLM-agent behavior into traceable execution data and scoreable quality signals."
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["observability", "telemetry", "llm", "backend", "django"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django",
+    "Programming Language :: Python :: 3.12"
+]
+authors = [
+    { name = "Aluizio Lira", email = "alumlira@gmail.com" }
+]
 dependencies = [
     "agno>=2.5.14",
     "ddgs>=9.13.0",
@@ -20,6 +29,9 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "yfinance>=1.2.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/aluiziolira/mini-agent-telemetry-lab"
 
 [dependency-groups]
 dev = [
