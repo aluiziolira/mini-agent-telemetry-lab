@@ -10,3 +10,6 @@ class ConsoleBackend(TelemetryBackend):
 
     def emit_span(self, span_doc: dict) -> None:
         print(f"[tracer] span: {json.dumps(span_doc, indent=2)}")
+
+    def close(self) -> None:
+        return None

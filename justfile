@@ -7,6 +7,9 @@ setup:
 agent:
     uv run python demo_agent.py "Should I buy AAPL?"
 
+raw-agent:
+    uv run python raw_sdk_agent.py "Show how a raw Python agent can share the telemetry tracer."
+
 eval:
     uv run python manage.py eval_pending
 
