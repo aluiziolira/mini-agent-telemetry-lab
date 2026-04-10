@@ -4,6 +4,51 @@ Most AI demo projects generate text just fine, but few explain *why* a response 
 
 **Mini Agent Telemetry Lab** is a backend observability system that turns opaque LLM-agent behavior into traceable execution data and scoreable quality signals. It makes every agent run inspectable, measurable, and evaluable through a single backend system built for debugging and iterative quality improvement.
 
+
+## Quick Start
+
+Get the system running in 3 commands:
+
+```bash
+# 1. Copy environment template
+cp .env.example .env
+# Edit .env: Add your LLM_API_KEY and INGEST_API_KEY
+
+# 2. Initialize everything (DB + migrations + superuser + web container)
+just init
+
+# 3. Run the full demo (agents + evaluations + verification)
+just demo
+```
+
+Then open http://localhost:8000/runs/ to see your telemetry.
+
+### Daily Development Workflow
+
+```bash
+just start     # Start the stack
+just demo      # Generate sample telemetry
+just logs      # Watch what's happening
+just stop      # Shutdown when done
+```
+
+### Available Recipes
+
+Run `just --list` to see all 20+ available recipes:
+
+| Recipe | Purpose |
+|--------|---------|
+| `just init` | First-time setup (DB → migrations → superuser → web) |
+| `just start` | Start the full application stack |
+| `just stop` | Stop all containers cleanly |
+| `just demo` | Complete demo cycle (agents + evals + verify) |
+| `just agent` | Run research_analyst agent (live tools + LLM) |
+| `just raw-agent` | Run raw_sdk_briefing_agent (rule-based) |
+| `just status` | Health check for containers + app |
+| `just verify` | Verify data integrity |
+| `just test` | Run pytest test suite |
+| `just logs` | Stream container logs |
+
 ## Architecture & Data Model
 
 This project optimizes for engineering signal density and iteration speed. I chose a Django monolith with DRF ingestion to enforce schema boundaries at ingress.
