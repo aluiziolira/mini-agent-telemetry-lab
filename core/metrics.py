@@ -5,7 +5,6 @@ from django.db.models import F
 
 from core.models import MetricCounter
 
-
 METRIC_DESCRIPTIONS = {
     "spans_ingested_total": "Total number of spans ingested",
     "eval_tasks_completed_total": "Total number of evaluation tasks completed",
@@ -30,13 +29,10 @@ class Metrics:
             self._ensure_counter_exists(metric_name)
 
         stored_values = dict(
-            MetricCounter.objects.filter(name__in=METRIC_DESCRIPTIONS).values_list(
-                "name", "value"
-            )
+            MetricCounter.objects.filter(name__in=METRIC_DESCRIPTIONS).values_list("name", "value")
         )
         return {
-            metric_name: stored_values.get(metric_name, 0)
-            for metric_name in METRIC_DESCRIPTIONS
+            metric_name: stored_values.get(metric_name, 0) for metric_name in METRIC_DESCRIPTIONS
         }
 
     def increment_spans_ingested(self):

@@ -8,6 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+.pytest_cache/
+.ruff_cache/
 
 # Django
 db.sqlite3
@@ -15,6 +17,21 @@ db.sqlite3
 
 # Environment
 .env
+.env.*
+!.env.example
+
+# Secrets / credentials
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.yaml
+secrets.yml
+id_rsa
+id_ed25519
+
+# Local documentation / notes
+*.local.md
 
 # IDE
 .vscode/
@@ -25,3 +42,7 @@ db.sqlite3
 # OS
 .DS_Store
 Thumbs.db
+
+# Local databases
+*.sqlite3
+*.db

@@ -150,7 +150,9 @@ def test_metrics_endpoint_reflects_completed_evaluations(client):
             {
                 "correctness": 4,
                 "helpfulness": 5,
-                "reasoning": "The analysis is factually grounded and directly answers the user's question.",
+                "reasoning": (
+                    "The analysis is factually grounded and directly answers the user's question."
+                ),
             }
         )
 

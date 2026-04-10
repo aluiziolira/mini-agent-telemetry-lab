@@ -1,12 +1,13 @@
 services:
   db:
     image: postgres:18
+    env_file: .env
     environment:
       POSTGRES_DB: telemetry_lab
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -19,7 +20,7 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@db:5432/telemetry_lab
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/telemetry_lab}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     command: uv run python manage.py runserver 0.0.0.0:8000

@@ -9,6 +9,8 @@ import dj_database_url
 from dotenv import load_dotenv
 from huey.contrib.sql_huey import SqlHuey
 
+from telemetry_lab.logging_config import get_logging_config
+
 load_dotenv()
 
 
@@ -46,9 +48,6 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
-
-# Logging configuration
-from telemetry_lab.logging_config import get_logging_config
 
 LOGGING = get_logging_config()
 

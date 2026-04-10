@@ -1,9 +1,7 @@
 """Version 1 judge prompt."""
 
 
-def get_judge_prompt_v1(
-    user_query: str, final_answer: str, tool_summaries: list[str]
-) -> str:
+def get_judge_prompt_v1(user_query: str, final_answer: str, tool_summaries: list[str]) -> str:
     """Version 1 judge prompt with standard rubric."""
     return (
         "You are grading an AI investment-assistant trace. "

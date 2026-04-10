@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from demo_tools import run_tool_with_retries
+from scripts.demo_tools import run_tool_with_retries
 from sdk.tracer import Tracer
 
 

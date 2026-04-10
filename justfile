@@ -3,7 +3,7 @@ set dotenv-load := true
 # =============================================================================
 # MINI AGENT TELEMETRY LAB - DEVELOPER WORKFLOWS
 # =============================================================================
-# 
+#
 # QUICK START (First Time):
 #   just init
 #   just demo
@@ -21,7 +21,12 @@ set dotenv-load := true
 # 🚀 SETUP & BOOTSTRAP (Run These First)
 # =============================================================================
 
-# Full first-time setup: DB → Migrations → Superuser → Web Container
+# Sync the project virtualenv and all dependencies
+sync:
+    @echo "📦 Syncing project environment with uv..."
+    uv sync --dev
+
+# Full first-time setup: DB → Migrations → Optional Superuser → Web Container
 init:
     @echo "🚀 Initializing Mini Agent Telemetry Lab..."
     docker compose up db -d --wait
@@ -30,17 +35,21 @@ init:
     @echo ""
     @echo "✅ Setup complete! Access your dashboard at:"
     @echo "   🌐 http://localhost:8000/runs/"
-    @echo "   🔐 Admin: http://localhost:8000/admin/ (admin/admin)"
+    @echo "   🔐 Admin: http://localhost:8000/admin/"
     @echo ""
     @echo "💡 Next: Run 'just demo' to generate sample telemetry"
 
-# Database migrations and superuser creation (requires DB running)
+# Database migrations and optional superuser creation (requires DB running)
 db-setup:
     @echo "📦 Running migrations..."
     uv run python manage.py migrate
-    @echo "👤 Creating superuser (admin/admin)..."
-    DJANGO_SUPERUSER_USERNAME=admin DJANGO_SUPERUSER_EMAIL=admin@example.com DJANGO_SUPERUSER_PASSWORD=admin \
-        uv run python manage.py createsuperuser --noinput 2>/dev/null || echo "   Superuser already exists"
+    @echo "👤 Superuser setup..."
+    @if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ] && [ -n "${DJANGO_SUPERUSER_EMAIL:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then \
+        uv run python manage.py createsuperuser --noinput 2>/dev/null || echo "   Superuser already exists"; \
+    else \
+        echo "   Skipping auto-create (set DJANGO_SUPERUSER_USERNAME, DJANGO_SUPERUSER_EMAIL, DJANGO_SUPERUSER_PASSWORD to enable)."; \
+        echo "   Or run interactively: uv run python manage.py createsuperuser"; \
+    fi
 
 
 # =============================================================================
@@ -113,11 +122,11 @@ demo:
 
 # Run research_analyst agent (real LLM + stock data + web search)
 agent:
-    uv run python demo_agent.py "Should I buy AAPL?"
+    PYTHONPATH=. uv run python scripts/demo_agent.py "Should I buy AAPL?"
 
 # Run raw_sdk_briefing_agent (rule-based, no external APIs)
 raw-agent:
-    uv run python raw_sdk_agent.py "Show how a raw Python agent can share the telemetry tracer."
+    PYTHONPATH=. uv run python scripts/raw_sdk_agent.py "Show how a raw Python agent can share the telemetry tracer."
 
 
 # =============================================================================
@@ -176,6 +185,17 @@ test:
     @echo "🧪 Running tests..."
     uv run pytest -q
 
+# Run Ruff lint checks
+lint:
+    @echo "🧹 Running Ruff..."
+    uv run ruff check .
+    uv run ruff format --check .
+
+# Apply Ruff formatting
+format:
+    @echo "✨ Formatting Python files with Ruff..."
+    uv run ruff format .
+
 
 # =============================================================================
 # 🔧 DEVELOPER UTILITIES (Debugging & Monitoring)
@@ -232,7 +252,7 @@ clean:
 #
 # URLS:
 #   http://localhost:8000/runs/      # Dashboard
-#   http://localhost:8000/admin/      # Django Admin (admin/admin)
+#   http://localhost:8000/admin/      # Django Admin
 #   http://localhost:8000/health/     # Health check
 #   http://localhost:8000/metrics/    # Prometheus metrics
 #

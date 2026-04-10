@@ -101,9 +101,7 @@ def test_demo_summary_surfaces_live_run_metrics_and_step_breakdown():
     assert "2. yfinance_fetch [tool OK] duration=120.0ms" in output
     assert "3. synthesis_call [llm OK] duration=200.0ms | tokens=150" in output
     assert "4. completion [chain OK] duration=50.0ms" in output
-    assert (
-        "5. run_finish [chain OK] duration=synthetic | completion_marker=true" in output
-    )
+    assert "5. run_finish [chain OK] duration=synthetic | completion_marker=true" in output
 
 
 @pytest.mark.django_db

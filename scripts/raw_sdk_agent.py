@@ -1,25 +1,32 @@
 import atexit
+import logging
+import logging.config
 import os
 import sys
 
 from dotenv import load_dotenv
 
 from sdk.tracer import Tracer
+from telemetry_lab.logging_config import get_logging_config
 
 load_dotenv()
+logging.config.dictConfig(get_logging_config())
+logger = logging.getLogger("telemetry_lab")
+
+ingest_api_key = os.environ.get("INGEST_API_KEY")
+if not ingest_api_key:
+    raise RuntimeError("INGEST_API_KEY is required to run scripts/raw_sdk_agent.py")
 
 tracer = Tracer(
     os.environ.get("TELEMETRY_BASE_URL", "http://127.0.0.1:8000"),
-    os.environ["INGEST_API_KEY"],
+    ingest_api_key,
 )
 tracer.agent_name = "raw_sdk_briefing_agent"
 atexit.register(tracer.shutdown)
 
 
 def summarize_topic(user_query: str) -> str:
-    words = [
-        word.strip(".,?!") for word in user_query.lower().split() if word.strip(".,?!")
-    ]
+    words = [word.strip(".,?!") for word in user_query.lower().split() if word.strip(".,?!")]
     keywords = [word for word in words if len(word) > 3][:3]
     return ", ".join(keywords) if keywords else "agent telemetry"
 
@@ -51,9 +58,7 @@ if __name__ == "__main__":
         root_span.set_attribute("input", user_query)
         root_span.set_attribute("agent_style", "raw_sdk")
 
-        with tracer.span(
-            "topic_summary", "tool", parent_span_id=root_span.span_id
-        ) as topic_span:
+        with tracer.span("topic_summary", "tool", parent_span_id=root_span.span_id) as topic_span:
             topic_summary = summarize_topic(user_query)
             topic_span.set_attribute("output", {"topic_summary": topic_summary})
 
@@ -63,19 +68,21 @@ if __name__ == "__main__":
             evidence = build_evidence(topic_summary)
             evidence_span.set_attribute("output", evidence)
 
-        with tracer.span(
-            "template_reasoner", "llm", parent_span_id=root_span.span_id
-        ) as llm_span:
+        with tracer.span("template_reasoner", "llm", parent_span_id=root_span.span_id) as llm_span:
             final_brief = draft_brief(user_query, evidence)
             llm_span.set_attribute("model", "rule_based_template_v1")
-            llm_span.set_attribute(
-                "prompt_tokens", len(user_query.split()) + len(evidence) * 8
-            )
+            llm_span.set_attribute("prompt_tokens", len(user_query.split()) + len(evidence) * 8)
             llm_span.set_attribute("completion_tokens", len(final_brief.split()))
-            llm_span.set_attribute(
-                "input", {"question": user_query, "evidence": evidence}
-            )
+            llm_span.set_attribute("input", {"question": user_query, "evidence": evidence})
             llm_span.set_attribute("output", final_brief)
 
         tracer.finish({"output": final_brief, "agent_style": "raw_sdk"})
-        print(final_brief)
+        logger.info(
+            "Raw SDK agent completed",
+            extra={
+                "extra_fields": {
+                    "output_length": len(final_brief),
+                    "agent_style": "raw_sdk",
+                }
+            },
+        )

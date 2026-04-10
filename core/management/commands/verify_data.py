@@ -23,13 +23,9 @@ class Command(BaseCommand):
 
         for span in spans:
             if span.parent_span_id:
-                parent_exists = str(span.parent_span_id) in trace_spans.get(
-                    span.trace_id_id, set()
-                )
+                parent_exists = str(span.parent_span_id) in trace_spans.get(span.trace_id_id, set())
                 if not parent_exists:
-                    issues.append(
-                        f"Orphaned span {span.span_id} in trace {span.trace_id_id}"
-                    )
+                    issues.append(f"Orphaned span {span.span_id} in trace {span.trace_id_id}")
 
         runs_with_spans = set(Span.objects.values_list("trace_id", flat=True))
         for run in Run.objects.all():

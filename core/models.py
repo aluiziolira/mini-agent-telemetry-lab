@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.utils import timezone
 
 
 class Run(models.Model):
@@ -17,9 +18,7 @@ class Run(models.Model):
     end_time = models.DateTimeField(null=True, blank=True)
     total_tokens = models.IntegerField(default=0)
     total_cost = models.DecimalField(max_digits=10, decimal_places=4, default=0)
-    eval_score = models.DecimalField(
-        max_digits=3, decimal_places=2, null=True, blank=True
-    )
+    eval_score = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["status"])]
@@ -67,9 +66,7 @@ class Span(models.Model):
 
 class Evaluation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
-    trace_id = models.OneToOneField(
-        Run, on_delete=models.CASCADE, related_name="evaluation"
-    )
+    trace_id = models.OneToOneField(Run, on_delete=models.CASCADE, related_name="evaluation")
     correctness_score = models.IntegerField()
     helpfulness_score = models.IntegerField()
     aggregate_score = models.DecimalField(max_digits=3, decimal_places=2)
@@ -117,6 +114,4 @@ class IdempotencyKey(models.Model):
         indexes = [models.Index(fields=["created_at"])]
 
     def is_expired(self):
-        from django.utils import timezone
-
         return self.created_at < timezone.now() - timezone.timedelta(hours=24)

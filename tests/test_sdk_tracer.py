@@ -15,9 +15,7 @@ def test_tracer_emits_nested_spans_before_terminal_finish_span() -> None:
     tracer.agent_name = "research_analyst"
 
     with tracer.span("research_analyst_run", "chain") as root_span:
-        with tracer.span(
-            "yfinance_fetch", "tool", parent_span_id=root_span.span_id
-        ) as child_span:
+        with tracer.span("yfinance_fetch", "tool", parent_span_id=root_span.span_id) as child_span:
             child_span.set_attribute("tool_name", "yfinance_fetch")
         tracer.finish({"output": "Buy cautiously"})
 
@@ -79,9 +77,7 @@ def test_finish_without_active_span_emits_terminal_span() -> None:
 
 def test_http_backend_is_fail_open_on_transport_errors() -> None:
     transport = httpx.MockTransport(
-        lambda request: (_ for _ in ()).throw(
-            httpx.ConnectError("down", request=request)
-        )
+        lambda request: (_ for _ in ()).throw(httpx.ConnectError("down", request=request))
     )
     backend = HTTPBackend("http://example.test", "test-key")
     backend.client = httpx.Client(transport=transport, timeout=1.0)

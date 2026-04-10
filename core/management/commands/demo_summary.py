@@ -56,11 +56,12 @@ class Command(BaseCommand):
 
             self.stdout.write(f"Run {index}: {run.agent_name}")
             self.stdout.write(f"  trace_id: {run.trace_id}")
-            self.stdout.write(
-                "  summary: "
-                f"status={run.status} | spans={len(spans)} | latency={_format_ms(total_latency_ms)} | "
-                f"tokens={run.total_tokens} | cost=${Decimal(run.total_cost):.4f} | eval_score={eval_score}"
+            summary = (
+                f"status={run.status} | spans={len(spans)} | "
+                f"latency={_format_ms(total_latency_ms)} | tokens={run.total_tokens} | "
+                f"cost=${Decimal(run.total_cost):.4f} | eval_score={eval_score}"
             )
+            self.stdout.write(f"  summary: {summary}")
             self.stdout.write("  steps:")
 
             for step_index, span in enumerate(spans, start=1):
@@ -70,13 +71,9 @@ class Command(BaseCommand):
                 span_tokens = prompt_tokens + completion_tokens
                 attempt = span.attributes.get("attempt")
                 max_attempts = span.attributes.get("max_attempts")
-                synthetic_completion = (
-                    span.name == "run_finish" and span_duration_ms == 0
-                )
+                synthetic_completion = span.name == "run_finish" and span_duration_ms == 0
                 display_duration = (
-                    "synthetic"
-                    if synthetic_completion
-                    else _format_ms(span_duration_ms)
+                    "synthetic" if synthetic_completion else _format_ms(span_duration_ms)
                 )
                 status_label = "OK" if span.status_code == "OK" else "ERROR"
 

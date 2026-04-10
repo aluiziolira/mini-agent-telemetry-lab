@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("core", "0001_initial"),
     ]
@@ -34,18 +33,14 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="evaluation",
             constraint=models.CheckConstraint(
-                condition=models.Q(
-                    ("correctness_score__gte", 1), ("correctness_score__lte", 5)
-                ),
+                condition=models.Q(("correctness_score__gte", 1), ("correctness_score__lte", 5)),
                 name="evaluation_correctness_score_range",
             ),
         ),
         migrations.AddConstraint(
             model_name="evaluation",
             constraint=models.CheckConstraint(
-                condition=models.Q(
-                    ("helpfulness_score__gte", 1), ("helpfulness_score__lte", 5)
-                ),
+                condition=models.Q(("helpfulness_score__gte", 1), ("helpfulness_score__lte", 5)),
                 name="evaluation_helpfulness_score_range",
             ),
         ),
@@ -72,8 +67,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="idempotencykey",
-            index=models.Index(
-                fields=["created_at"], name="core_idempo_created_bb3e28_idx"
-            ),
+            index=models.Index(fields=["created_at"], name="core_idempo_created_bb3e28_idx"),
         ),
     ]

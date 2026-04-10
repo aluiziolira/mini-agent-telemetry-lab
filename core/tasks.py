@@ -1,6 +1,5 @@
-import logging
-import os
 import json
+import logging
 from decimal import Decimal
 
 from huey.contrib.djhuey import db_task
@@ -67,9 +66,7 @@ def evaluate_run(trace_id):
     try:
         parsed = json.loads(response_text)
     except json.JSONDecodeError:
-        logger.warning(
-            "Failed to parse judge response", extra={"trace_id": str(trace_id)}
-        )
+        logger.warning("Failed to parse judge response", extra={"trace_id": str(trace_id)})
         return
 
     aggregate_score = Decimal(str((parsed["correctness"] + parsed["helpfulness"]) / 2))
