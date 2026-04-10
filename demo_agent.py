@@ -8,6 +8,7 @@ from ddgs import DDGS
 from openai import OpenAI
 from dotenv import load_dotenv
 
+from demo_tools import run_tool_with_retries
 from sdk.tracer import Tracer
 
 load_dotenv()
@@ -31,39 +32,59 @@ def extract_symbol(query):
     return matches[-1] if matches else "AAPL"
 
 
+def _fetch_stock_data(stock_span, symbol):
+    info = yf.Ticker(symbol).info
+    stock_data = {
+        "symbol": symbol,
+        "price": info.get("currentPrice"),
+        "pe_ratio": info.get("trailingPE"),
+        "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
+        "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+        "market_cap": info.get("marketCap"),
+    }
+    stock_span.set_attribute("output", stock_data)
+    return stock_data
+
+
+def _run_web_search(search_span, symbol):
+    if random.random() < 0.2:
+        raise TimeoutError("simulated search timeout")
+
+    data = list(DDGS().text(f"{symbol} stock news", max_results=3))
+    search_summary = truncate(
+        " | ".join(item.get("title", "") for item in data)
+        or "No search summary found.",
+        500,
+    )
+    search_span.set_attribute("output", search_summary)
+    return search_summary
+
+
 if __name__ == "__main__":
     user_query = os.sys.argv[1]
     symbol = extract_symbol(user_query)
     with tracer.span("research_analyst_run", "chain") as root_span:
         root_span.set_attribute("input", user_query)
-        with tracer.span(
-            "yfinance_fetch", "tool", parent_span_id=root_span.span_id
-        ) as stock_span:
-            info = yf.Ticker(symbol).info
-            stock_data = {
-                "symbol": symbol,
-                "price": info.get("currentPrice"),
-                "pe_ratio": info.get("trailingPE"),
-                "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
-                "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
-                "market_cap": info.get("marketCap"),
-            }
-            stock_span.set_attribute("output", stock_data)
+        try:
+            stock_data = run_tool_with_retries(
+                tracer,
+                tool_name="yfinance_fetch",
+                parent_span_id=root_span.span_id,
+                max_attempts=2,
+                operation=lambda stock_span: _fetch_stock_data(stock_span, symbol),
+            )
+        except Exception as exc:
+            stock_data = {"symbol": symbol, "error": f"Stock data unavailable: {exc}"}
 
         search_summary = ""
         try:
-            with tracer.span(
-                "web_search", "tool", parent_span_id=root_span.span_id
-            ) as search_span:
-                if random.random() < 0.2:
-                    raise TimeoutError("simulated search timeout")
-                data = list(DDGS().text(f"{symbol} stock news", max_results=3))
-                search_summary = truncate(
-                    " | ".join(item.get("title", "") for item in data)
-                    or "No search summary found.",
-                    500,
-                )
-                search_span.set_attribute("output", search_summary)
+            search_summary = run_tool_with_retries(
+                tracer,
+                tool_name="web_search",
+                parent_span_id=root_span.span_id,
+                max_attempts=2,
+                operation=lambda search_span: _run_web_search(search_span, symbol),
+            )
         except Exception as exc:
             search_summary = f"Search unavailable: {exc}"
 
