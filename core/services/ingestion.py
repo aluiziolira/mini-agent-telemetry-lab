@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Callable
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -12,17 +13,23 @@ from core.services.exceptions import (
     SpanAlreadyExistsError,
 )
 from core.services.finalization import finalize_run_if_needed
+from core.types import IngestSpanResult, PostIngestPayload, SpanIngestData
 from core.validators import ValidationError, validate_span_attributes
 
 
-def ingest_span(*, data: dict, idempotency_key: str | None, post_ingest_hook):
+def ingest_span(
+    *,
+    data: SpanIngestData,
+    idempotency_key: str | None,
+    post_ingest_hook: Callable[[str, PostIngestPayload], None],
+) -> IngestSpanResult:
     validate_payload_semantics(data)
 
     with transaction.atomic():
         run, _ = Run.objects.get_or_create(
             trace_id=data["trace_id"],
             defaults={
-                "agent_name": data.get("agent_name", "unknown"),
+                "agent_name": data["agent_name"],
                 "status": "running",
                 "start_time": data["start_time"],
             },
@@ -39,20 +46,20 @@ def ingest_span(*, data: dict, idempotency_key: str | None, post_ingest_hook):
             span = Span.objects.create(
                 span_id=data["span_id"],
                 trace_id=run,
-                parent_span_id=data.get("parent_span_id"),
+                parent_span_id=data["parent_span_id"],
                 span_type=data["span_type"],
                 name=data["name"],
                 start_time=data["start_time"],
                 end_time=data["end_time"],
                 status_code=data["status_code"],
-                attributes=data.get("attributes", {}),
+                attributes=data["attributes"],
             )
         except IntegrityError as exc:
             raise SpanAlreadyExistsError("span_id already exists") from exc
 
         run_completed = finalize_run_if_needed(
             run=run,
-            is_final=data.get("is_final", False),
+            is_final=data["is_final"],
             end_time=data["end_time"],
         )
 
@@ -83,8 +90,8 @@ def claim_idempotency_key(idempotency_key: str | None) -> None:
         raise IdempotentDuplicateError("duplicate idempotency key") from exc
 
 
-def validate_payload_semantics(data: dict) -> None:
-    validate_span_attributes(data.get("span_type"), data.get("attributes", {}))
+def validate_payload_semantics(data: SpanIngestData) -> None:
+    validate_span_attributes(data["span_type"], data["attributes"])
 
     now = timezone.now()
     future_threshold = now + timedelta(minutes=1)
@@ -100,8 +107,8 @@ def validate_payload_semantics(data: dict) -> None:
         raise ValidationError("end_time too old")
 
 
-def validate_parent_span(*, data: dict, run: Run) -> None:
-    parent_span_id = data.get("parent_span_id")
+def validate_parent_span(*, data: SpanIngestData, run: Run) -> None:
+    parent_span_id = data["parent_span_id"]
     if not parent_span_id:
         return
 

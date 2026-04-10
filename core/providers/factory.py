@@ -8,7 +8,7 @@ from .openai import OpenAIProvider
 
 def create_llm_provider() -> LLMProvider:
     """Factory for LLM providers based on settings."""
-    provider_name = settings.EVAL_LLM_PROVIDER
+    provider_name: str = settings.EVAL_LLM_PROVIDER
 
     if provider_name == "openai":
         return OpenAIProvider(api_key=settings.LLM_API_KEY)

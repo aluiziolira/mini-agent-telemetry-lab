@@ -36,6 +36,9 @@ Repository = "https://github.com/aluiziolira/mini-agent-telemetry-lab"
 [dependency-groups]
 dev = [
     "ruff>=0.15.9",
+    "mypy>=1.15.0",
+    "django-stubs>=5.2.0",
+    "djangorestframework-stubs>=3.16.0",
 ]
 
 [tool.ruff]
@@ -44,3 +47,33 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.mypy]
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+strict = true
+
+# Only check high-leverage modules — skip tests, scripts, migrations
+files = [
+    "core/models.py",
+    "core/views.py",
+    "core/serializers.py",
+    "core/validators.py",
+    "core/hooks.py",
+    "core/metrics.py",
+    "core/tasks.py",
+    "core/middleware/request_id.py",
+    "core/services/finalization.py",
+    "core/services/ingestion.py",
+    "core/types.py",
+    "core/providers/",
+    "sdk/types.py",
+    "sdk/tracer.py",
+    "sdk/backends/",
+]
+
+[[tool.mypy.overrides]]
+module = ["huey.*", "huey.contrib.djhuey"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "telemetry_lab.settings"

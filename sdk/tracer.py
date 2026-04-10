@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
-from typing import Any
+from types import TracebackType
+from typing import Any, Literal
 from uuid import uuid4
 
 from sdk.backends.base import TelemetryBackend
@@ -38,7 +39,12 @@ class SpanContext(AbstractContextManager["SpanContext"]):
         self.tracer._enter_span(self)
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> Literal[False]:
         end_time = _utc_now()
         if exc is not None:
             self.attributes["error_type"] = exc.__class__.__name__

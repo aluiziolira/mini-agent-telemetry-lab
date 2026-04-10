@@ -4,18 +4,22 @@ import logging
 import time
 import uuid as uuid_module
 from collections import defaultdict
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from django.conf import settings
 from django.db import connection
+from django.db.models import QuerySet
 from django.http import HttpResponse
 from django.views.generic import DetailView, ListView
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.hooks import run_hook
 from core.metrics import metrics
 from core.middleware.request_id import get_current_request_id
-from core.models import Run
+from core.models import Run, Span
 from core.serializers import SpanIngestSerializer
 from core.services.exceptions import (
     CompletedRunConflictError,
@@ -24,11 +28,34 @@ from core.services.exceptions import (
     SpanAlreadyExistsError,
 )
 from core.services.ingestion import ingest_span
+from core.types import SpanIngestData
 from core.validators import ValidationError
 
 logger = logging.getLogger("telemetry_lab")
 
-_rate_limits = defaultdict(lambda: {"count": 0, "reset_time": 0})
+if TYPE_CHECKING:
+    BaseRunListView = ListView[Run]
+    BaseRunDetailView = DetailView[Run]
+else:
+    BaseRunListView = ListView
+    BaseRunDetailView = DetailView
+
+
+class RateLimitBucket(TypedDict):
+    count: int
+    reset_time: float
+
+
+class SpanTreeNode(TypedDict):
+    span: Span
+    children: list["SpanTreeNode"]
+    duration_ms: float
+    attributes_json: str
+
+
+_rate_limits: defaultdict[str, RateLimitBucket] = defaultdict(
+    lambda: {"count": 0, "reset_time": 0.0}
+)
 
 
 def _check_rate_limit(api_key: str, limit: int = 100, window: int = 60) -> bool:
@@ -52,7 +79,7 @@ class IngestSpanView(APIView):
     trigger a new version (/api/v2/ingest/span/).
     """
 
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         if request.headers.get("X-API-Key") != settings.INGEST_API_KEY:
             return Response({"error": "forbidden"}, status=403)
 
@@ -69,7 +96,7 @@ class IngestSpanView(APIView):
         serializer = SpanIngestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
-        data = serializer.validated_data
+        data = cast(SpanIngestData, serializer.validated_data)
 
         try:
             result = ingest_span(
@@ -109,8 +136,8 @@ class IngestSpanView(APIView):
         )
 
 
-def build_span_tree(spans):
-    span_map = {
+def build_span_tree(spans: list[Span]) -> list[SpanTreeNode]:
+    span_map: dict[str, SpanTreeNode] = {
         str(span.span_id): {
             "span": span,
             "children": [],
@@ -119,7 +146,7 @@ def build_span_tree(spans):
         }
         for span in spans
     }
-    roots = []
+    roots: list[SpanTreeNode] = []
     for item in span_map.values():
         pid = str(item["span"].parent_span_id) if item["span"].parent_span_id else None
         if pid and pid in span_map:
@@ -129,18 +156,18 @@ def build_span_tree(spans):
     return roots
 
 
-def latency_ms(start_time, end_time):
+def latency_ms(start_time: datetime, end_time: datetime | None) -> float | None:
     if not end_time:
         return None
     return (end_time - start_time).total_seconds() * 1000
 
 
-class RunListView(ListView):
+class RunListView(BaseRunListView):
     model = Run
     template_name = "core/run_list.html"
     context_object_name = "runs"
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Run]:
         sort = self.request.GET.get("sort", "-start_time")
         allowed = [
             "start_time",
@@ -154,7 +181,7 @@ class RunListView(ListView):
             sort = "-start_time"
         return Run.objects.select_related("evaluation").order_by(sort)
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         ctx = super().get_context_data(**kwargs)
         ctx["run_rows"] = [
             {"run": run, "latency_ms": latency_ms(run.start_time, run.end_time)}
@@ -163,12 +190,12 @@ class RunListView(ListView):
         return ctx
 
 
-class RunDetailView(DetailView):
+class RunDetailView(BaseRunDetailView):
     model = Run
     template_name = "core/run_detail.html"
     pk_url_kwarg = "trace_id"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         ctx = super().get_context_data(**kwargs)
         spans = list(self.object.spans.order_by("start_time"))
         ctx["span_tree"] = build_span_tree(spans)
@@ -179,8 +206,8 @@ class RunDetailView(DetailView):
 
 
 class HealthCheckView(APIView):
-    def get(self, request):
-        checks = {}
+    def get(self, request: Request) -> Response:
+        checks: dict[str, str] = {}
 
         try:
             with connection.cursor() as cursor:
@@ -203,7 +230,7 @@ class HealthCheckView(APIView):
 
 
 class MetricsView(APIView):
-    def get(self, request):
+    def get(self, request: Request) -> HttpResponse:
         return HttpResponse(
             metrics.get_prometheus_text(),
             content_type="text/plain; charset=utf-8",

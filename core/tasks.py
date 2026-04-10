@@ -1,6 +1,8 @@
 import json
 import logging
 from decimal import Decimal
+from typing import Any, Callable, TypeVar, cast
+from uuid import UUID
 
 from django.conf import settings
 from django.utils import timezone
@@ -12,6 +14,13 @@ from core.models import Evaluation, Run
 from core.providers.factory import create_llm_provider
 
 logger = logging.getLogger("telemetry_lab")
+
+TaskFunc = TypeVar("TaskFunc", bound=Callable[..., Any])
+
+
+def _typed_db_task() -> Callable[[TaskFunc], TaskFunc]:
+    return cast(Callable[[TaskFunc], TaskFunc], db_task())
+
 
 # --- PRODUCTION PATH NOTE ---
 # The evaluate_run() task below uses Huey with a PostgreSQL backend.
@@ -27,8 +36,8 @@ logger = logging.getLogger("telemetry_lab")
 # ----------------------------
 
 
-@db_task()
-def evaluate_run(trace_id):
+@_typed_db_task()
+def evaluate_run(trace_id: UUID) -> None:
     prompt_version = "v1"
     provider_name = settings.EVAL_LLM_PROVIDER
 

@@ -6,6 +6,8 @@ import logging
 
 import httpx
 
+from sdk.types import TelemetrySpanDoc
+
 from .base import TelemetryBackend
 
 logger = logging.getLogger("telemetry_lab")
@@ -19,7 +21,7 @@ class HTTPBackend(TelemetryBackend):
         self.api_key = api_key
         self.client = httpx.Client(timeout=timeout)
 
-    def emit_span(self, span_doc: dict) -> None:
+    def emit_span(self, span_doc: TelemetrySpanDoc) -> None:
         try:
             response = self.client.post(
                 f"{self.base_url}/api/v1/ingest/span/",

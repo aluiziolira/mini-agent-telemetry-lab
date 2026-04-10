@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 from django.db import models
 from django.utils import timezone
@@ -33,7 +34,7 @@ class Run(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.trace_id)
 
 
@@ -60,7 +61,7 @@ class Span(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -102,7 +103,7 @@ class Evaluation(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.trace_id)
 
 
@@ -118,7 +119,7 @@ class MetricCounter(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -129,5 +130,5 @@ class IdempotencyKey(models.Model):
     class Meta:
         indexes = [models.Index(fields=["created_at"])]
 
-    def is_expired(self):
-        return self.created_at < timezone.now() - timezone.timedelta(hours=24)
+    def is_expired(self) -> bool:
+        return self.created_at < timezone.now() - timedelta(hours=24)

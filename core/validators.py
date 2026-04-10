@@ -4,6 +4,8 @@ These validators ensure span attributes conform to the expected schema
 for each span_type, enforcing data quality at the ingestion boundary.
 """
 
+from core.types import SpanAttributes, SpanType
+
 
 class ValidationError(ValueError):
     """Raised when span attributes fail validation."""
@@ -11,7 +13,7 @@ class ValidationError(ValueError):
     pass
 
 
-def validate_span_attributes(span_type, attributes):
+def validate_span_attributes(span_type: SpanType, attributes: SpanAttributes) -> bool:
     """Validate span attributes based on span_type schema.
 
     Args:

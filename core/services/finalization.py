@@ -1,9 +1,10 @@
+from datetime import datetime
 from decimal import Decimal
 
 from core.models import Run, Span
 
 
-def finalize_run_if_needed(*, run: Run, is_final: bool, end_time):
+def finalize_run_if_needed(*, run: Run, is_final: bool, end_time: datetime) -> bool:
     if not is_final:
         return False
 

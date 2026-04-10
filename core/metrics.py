@@ -16,17 +16,17 @@ METRIC_DESCRIPTIONS = {
 class Metrics:
     """Database-backed metrics store."""
 
-    def _ensure_counter_exists(self, metric_name):
+    def _ensure_counter_exists(self, metric_name: str) -> None:
         try:
             MetricCounter.objects.get_or_create(name=metric_name)
         except IntegrityError:
             pass
 
-    def _increment(self, metric_name):
+    def _increment(self, metric_name: str) -> None:
         self._ensure_counter_exists(metric_name)
         MetricCounter.objects.filter(name=metric_name).update(value=F("value") + 1)
 
-    def _get_metric_values(self):
+    def _get_metric_values(self) -> dict[str, int]:
         for metric_name in METRIC_DESCRIPTIONS:
             self._ensure_counter_exists(metric_name)
 
@@ -37,19 +37,19 @@ class Metrics:
             metric_name: stored_values.get(metric_name, 0) for metric_name in METRIC_DESCRIPTIONS
         }
 
-    def increment_spans_ingested(self):
+    def increment_spans_ingested(self) -> None:
         self._increment("spans_ingested_total")
 
-    def increment_eval_tasks_completed(self):
+    def increment_eval_tasks_completed(self) -> None:
         self._increment("eval_tasks_completed_total")
 
-    def increment_eval_tasks_started(self):
+    def increment_eval_tasks_started(self) -> None:
         self._increment("eval_tasks_started_total")
 
-    def increment_eval_tasks_failed(self):
+    def increment_eval_tasks_failed(self) -> None:
         self._increment("eval_tasks_failed_total")
 
-    def get_prometheus_text(self):
+    def get_prometheus_text(self) -> str:
         metric_values = self._get_metric_values()
         lines = []
         for metric_name, description in METRIC_DESCRIPTIONS.items():
