@@ -1,3 +1,4 @@
+import atexit
 import os
 import random
 import re
@@ -16,6 +17,7 @@ tracer = Tracer(
     os.environ["INGEST_API_KEY"],
 )
 tracer.agent_name = "research_analyst"
+atexit.register(tracer.shutdown)
 openai_client = OpenAI(api_key=os.environ["LLM_API_KEY"])
 
 
