@@ -7,30 +7,53 @@ Most AI demo projects generate text just fine, but few explain *why* a response 
 
 ## Quick Start
 
-Get the system running in 3 commands:
+Get the system running in 4 commands:
 
 ```bash
 # 1. Copy environment template
 cp .env.example .env
 # Edit .env: Add your LLM_API_KEY and INGEST_API_KEY
 
-# 2. Initialize everything (DB + migrations + superuser + web container)
+# 2. Sync the project environment
+uv sync --dev
+
+# 3. Initialize everything (DB + migrations + web container)
 just init
 
-# 3. Run the full demo (agents + evaluations + verification)
+# 4. Run the full demo (agents + evaluations + verification)
 just demo
 ```
 
 Then open http://localhost:8000/runs/ to see your telemetry.
 
+If you want Django admin access, create a superuser explicitly:
+
+```bash
+uv run python manage.py createsuperuser
+```
+
 ### Daily Development Workflow
 
 ```bash
+just sync      # Sync the uv-managed virtualenv
 just start     # Start the stack
 just demo      # Generate sample telemetry
+just test      # Run tests inside the project virtualenv
 just logs      # Watch what's happening
 just stop      # Shutdown when done
 ```
+
+### Local Python Workflow
+
+Use the project virtualenv managed by `uv` for all Python commands:
+
+```bash
+uv sync --dev
+uv run pytest -q
+uv run ruff check .
+```
+
+`pytest -q` without `uv run` can execute against a different interpreter than the synced project environment, which is why the supported workflow is `uv run ...` or the `just` recipes.
 
 ### Available Recipes
 
@@ -38,7 +61,7 @@ Run `just --list` to see all 20+ available recipes:
 
 | Recipe | Purpose |
 |--------|---------|
-| `just init` | First-time setup (DB → migrations → superuser → web) |
+| `just init` | First-time setup (DB → migrations → web) |
 | `just start` | Start the full application stack |
 | `just stop` | Stop all containers cleanly |
 | `just demo` | Complete demo cycle (agents + evals + verify) |
@@ -48,6 +71,31 @@ Run `just --list` to see all 20+ available recipes:
 | `just verify` | Verify data integrity |
 | `just test` | Run pytest test suite |
 | `just logs` | Stream container logs |
+
+
+## Configuration
+
+The application validates its environment on startup and fails fast if required settings are missing or invalid.
+
+Required variables:
+* `DJANGO_SECRET_KEY`: Cryptographic signing key.
+* `INGEST_API_KEY`: Authentic key required for span ingestion.
+* `DATABASE_URL`: PostgreSQL connection string.
+
+Use non-placeholder values in your local `.env` (the app rejects `REPLACE_ME...` and `changeme...` values for required secrets).
+
+Optional overrides:
+* `DEBUG`: Defaults to `False`. When `False`, `ALLOWED_HOSTS` must be explicitly provided.
+* `ALLOWED_HOSTS`: Comma-separated list of permitted hostnames.
+* `EVAL_LLM_PROVIDER`: Evaluator model provider (defaults to `openai`).
+* `LLM_API_KEY`: Required only if the chosen evaluation provider needs one.
+
+### Security Notes for Public Repos
+
+* Keep `.env` local-only (never commit real keys).
+* Docker ports are bound to localhost by default for safer local demos.
+* Console telemetry logging is metadata-only (span identifiers and attribute keys), not full prompt/output payloads.
+
 
 ## Architecture & Data Model
 
@@ -112,7 +160,7 @@ just agent
 just raw-agent
 ```
 
-* `demo_agent.py` shows a richer research flow with live tools and an LLM call.
-* `raw_sdk_agent.py` is a standalone hand-rolled Python agent that uses the same `sdk.tracer.Tracer` directly and still posts spans to `/api/v1/ingest/span/`.
+* `scripts/demo_agent.py` shows a richer research flow with live tools and an LLM call.
+* `scripts/raw_sdk_agent.py` is a standalone hand-rolled Python agent that uses the same `sdk.tracer.Tracer` directly and still posts spans to `/api/v1/ingest/span/`.
 
 That side-by-side contrast is the framework-agnostic proof: two different agent styles, one telemetry pipeline.

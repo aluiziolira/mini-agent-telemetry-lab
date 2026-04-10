@@ -18,4 +18,7 @@ class OpenAIProvider(LLMProvider):
             messages=messages,
             **kwargs,
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if content is None or not content.strip():
+            raise ValueError("OpenAI provider returned empty completion content")
+        return content
