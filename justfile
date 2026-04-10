@@ -102,8 +102,11 @@ demo:
     @echo "Step 3/4: Processing evaluations via Huey worker..."
     just eval-pipeline
     @echo ""
-    @echo "Step 4/4: Verifying data integrity..."
+    @echo "Step 4/5: Verifying data integrity..."
     just verify
+    @echo ""
+    @echo "Step 5/5: Surfacing live execution metrics..."
+    just demo-summary
     @echo ""
     @echo "✅ Demo complete! View results at:"
     @echo "   http://localhost:8000/runs/"
@@ -138,6 +141,27 @@ worker:
 verify:
     @echo "🔍 Verifying data integrity..."
     uv run python manage.py verify_data
+
+# Summarize recent completed runs with recruiter-friendly execution evidence
+demo-summary:
+    @echo "🎯 Summarizing the latest demo runs..."
+    uv run python manage.py demo_summary --limit 2
+
+# Surface the strongest README proof points through focused tests
+proof:
+    @echo "📌 Portfolio proof points from the test suite:"
+    @echo "   - run lifecycle transitions from running to completed"
+    @echo "   - completed runs roll up 150 tokens and Decimal(\"0.0003\") cost"
+    @echo "   - nested spans reconstruct root -> child -> grandchild"
+    @echo "   - evaluations persist and denormalize run.eval_score == Decimal(\"4.5\")"
+    @echo "   - metrics expose spans_ingested_total and eval_tasks_completed_total"
+    @echo ""
+    uv run pytest -q -vv \
+        tests/test_lifecycle.py::test_full_run_lifecycle_rolls_up_metrics_and_links_spans \
+        tests/test_lifecycle.py::test_build_span_tree_reconstructs_nested_trace_for_run_detail \
+        tests/test_evaluation.py::test_completed_run_is_scored_and_denormalized_for_review \
+        tests/test_metrics.py::test_metrics_endpoint_persists_span_ingestion_count \
+        tests/test_metrics.py::test_metrics_endpoint_reflects_completed_evaluations
 
 # Show Prometheus metrics endpoint
 metrics:
