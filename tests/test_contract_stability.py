@@ -1,8 +1,4 @@
-"""Contract tests for API schema stability and enum consistency.
-
-These tests verify that the API contract remains stable over time,
-catching breaking changes before they affect clients.
-"""
+"""Contract tests for the API and model enums reviewers rely on."""
 
 import uuid
 
@@ -14,14 +10,10 @@ from core.models import Span
 
 
 @pytest.mark.django_db
-def test_ingestion_response_schema(client, settings):
-    """Verify JSON response structure for span ingestion hasn't changed.
-
-    Contract: Response must contain 'span_id' field with string value.
-    For non-final spans, response should NOT contain 'run_status'.
-    """
+def test_non_final_ingestion_response_schema_stays_minimal(client, settings):
     settings.INGEST_API_KEY = "dev-ingest-key"
     now = timezone.now()
+
     response = client.post(
         reverse("ingest_span"),
         data={
@@ -36,25 +28,19 @@ def test_ingestion_response_schema(client, settings):
         content_type="application/json",
         headers={"X-API-Key": "dev-ingest-key"},
     )
+
     assert response.status_code == 201
-    data = response.json()
-    assert "span_id" in data
-    assert isinstance(data["span_id"], str)
-    assert "run_status" not in data
+    assert response.json() == {"span_id": response.json()["span_id"]}
+    assert isinstance(response.json()["span_id"], str)
 
 
 @pytest.mark.django_db
-def test_final_span_response_schema_includes_run_status(client, settings):
-    """Verify final span response includes run_status field.
-
-    Contract: When is_final=True, response must include 'run_status' field
-    with value 'completed' after run aggregation.
-    """
+def test_final_ingestion_response_schema_includes_completed_status(client, settings):
     settings.INGEST_API_KEY = "dev-ingest-key"
     trace_id = uuid.uuid4()
     now = timezone.now()
 
-    client.post(
+    root_response = client.post(
         reverse("ingest_span"),
         data={
             "span_id": str(uuid.uuid4()),
@@ -68,6 +54,7 @@ def test_final_span_response_schema_includes_run_status(client, settings):
         content_type="application/json",
         headers={"X-API-Key": "dev-ingest-key"},
     )
+    assert root_response.status_code == 201
 
     response = client.post(
         reverse("ingest_span"),
@@ -86,26 +73,17 @@ def test_final_span_response_schema_includes_run_status(client, settings):
     )
 
     assert response.status_code == 201
-    data = response.json()
-    assert "span_id" in data
-    assert "run_status" in data
-    assert data["run_status"] == "completed"
+    assert response.json()["run_status"] == "completed"
+    assert isinstance(response.json()["span_id"], str)
 
 
-def test_span_types_enum():
-    """Verify span_type choices are consistent with model definition.
-
-    Contract: span_type choices must match OTel-inspired semantic conventions.
-    Changes to these choices are breaking changes for API clients.
-    """
-    expected = [("llm", "llm"), ("tool", "tool"), ("chain", "chain")]
-    assert Span.SPAN_TYPE_CHOICES == expected
+def test_span_type_enum_remains_stable():
+    assert Span.SPAN_TYPE_CHOICES == [
+        ("llm", "llm"),
+        ("tool", "tool"),
+        ("chain", "chain"),
+    ]
 
 
-def test_status_codes_enum():
-    """Verify status_code choices are consistent with model definition.
-
-    Contract: status_code uses OK/ERROR pattern aligned with OTel conventions.
-    """
-    expected = [("OK", "OK"), ("ERROR", "ERROR")]
-    assert Span.STATUS_CODE_CHOICES == expected
+def test_status_code_enum_remains_stable():
+    assert Span.STATUS_CODE_CHOICES == [("OK", "OK"), ("ERROR", "ERROR")]
