@@ -1,11 +1,16 @@
+import logging
 import os
 import json
 from decimal import Decimal
 
 from huey.contrib.djhuey import db_task
-from openai import OpenAI
 
+from core.evaluation.prompts.v1 import get_judge_prompt_v1
+from core.metrics import metrics
 from core.models import Evaluation, Run
+from core.providers.factory import create_llm_provider
+
+logger = logging.getLogger("telemetry_lab")
 
 # --- PRODUCTION PATH NOTE ---
 # The evaluate_run() task below uses Huey with a PostgreSQL backend.
@@ -26,12 +31,12 @@ def evaluate_run(trace_id):
     try:
         run = Run.objects.get(trace_id=trace_id)
     except Run.DoesNotExist:
-        print(f"[eval] warn: run {trace_id} does not exist")
+        logger.warning("Run does not exist", extra={"trace_id": str(trace_id)})
         return
 
     spans = list(run.spans.order_by("start_time"))
     if not spans:
-        print(f"[eval] warn: run {trace_id} has no spans")
+        logger.warning("Run has no spans", extra={"trace_id": str(trace_id)})
         return
 
     user_query = next(
@@ -48,33 +53,23 @@ def evaluate_run(trace_id):
         if s.span_type == "tool"
     ]
 
-    prompt = (
-        "You are grading an AI investment-assistant trace. "
-        "Score correctness (1-5) based on factual grounding and helpfulness (1-5) based on whether it answers the user's question directly. "
-        "Return a JSON object with exactly these keys: correctness, helpfulness, reasoning.\n\n"
-        f"User question: {user_query}\n"
-        f"Final answer: {final_answer}\n"
-        f"Tool summaries: {tool_summaries}\n"
-    )
+    prompt = get_judge_prompt_v1(user_query, final_answer, tool_summaries)
 
-    client = OpenAI(api_key=os.environ["LLM_API_KEY"])
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
+    provider = create_llm_provider()
+    response_text = provider.create_completion(
         messages=[
-            {
-                "role": "system",
-                "content": "Respond only with a valid JSON object.",
-            },
+            {"role": "system", "content": "Respond only with a valid JSON object."},
             {"role": "user", "content": prompt},
         ],
         response_format={"type": "json_object"},
     )
-    response_text = response.choices[0].message.content
 
     try:
         parsed = json.loads(response_text)
     except json.JSONDecodeError:
-        print(f"[eval] warn: failed to parse judge response for {trace_id}")
+        logger.warning(
+            "Failed to parse judge response", extra={"trace_id": str(trace_id)}
+        )
         return
 
     aggregate_score = Decimal(str((parsed["correctness"] + parsed["helpfulness"]) / 2))
@@ -84,6 +79,16 @@ def evaluate_run(trace_id):
         helpfulness_score=parsed["helpfulness"],
         aggregate_score=aggregate_score,
         reasoning=parsed["reasoning"],
+        prompt_version="v1",
     )
     run.eval_score = aggregate_score
     run.save()
+
+    metrics.increment_eval_tasks_completed()
+    logger.info(
+        "Evaluation completed",
+        extra={
+            "trace_id": str(trace_id),
+            "extra_fields": {"eval_score": str(aggregate_score)},
+        },
+    )

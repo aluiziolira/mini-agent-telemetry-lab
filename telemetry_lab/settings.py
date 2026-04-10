@@ -38,13 +38,19 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "core.middleware.request_id.RequestIdMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Logging configuration
+from telemetry_lab.logging_config import get_logging_config
+
+LOGGING = get_logging_config()
 
 ROOT_URLCONF = "telemetry_lab.urls"
 
@@ -72,6 +78,8 @@ DATABASES = {
 }
 
 HUEY = SqlHuey("telemetry_lab", database=env("DATABASE_URL"))
+
+EVAL_LLM_PROVIDER = env("EVAL_LLM_PROVIDER", "openai")
 
 AUTH_PASSWORD_VALIDATORS = [
     {
