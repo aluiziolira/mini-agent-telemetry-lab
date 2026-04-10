@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 
-class SpanIngestSerializer(serializers.Serializer):
+class SpanIngestSerializer(serializers.Serializer[object]):
     span_id = serializers.UUIDField()
     trace_id = serializers.UUIDField()
     name = serializers.CharField(max_length=200)

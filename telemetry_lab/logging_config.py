@@ -3,13 +3,15 @@
 import json
 import logging
 from datetime import datetime, timezone
+from logging import LogRecord
+from typing import Any
 
 
 class StructuredFormatter(logging.Formatter):
     """JSON formatter for structured logging."""
 
-    def format(self, record):
-        log_entry = {
+    def format(self, record: LogRecord) -> str:
+        log_entry: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -26,7 +28,7 @@ class StructuredFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 
-def get_logging_config():
+def get_logging_config() -> dict[str, Any]:
     """Return Django LOGGING configuration dict."""
     return {
         "version": 1,

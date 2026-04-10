@@ -27,3 +27,14 @@ repos:
       - id: trailing-whitespace
       - id: no-commit-to-branch
         args: [--branch, main]
+
+  # Type checking (high-leverage modules only)
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (core + sdk)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true

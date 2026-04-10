@@ -196,6 +196,11 @@ format:
     @echo "✨ Formatting Python files with Ruff..."
     uv run ruff format .
 
+# Run mypy typecheck on high-leverage modules (core services, sdk)
+typecheck:
+    @echo "🔍 Running mypy on high-leverage modules..."
+    uv run mypy
+
 
 # =============================================================================
 # 🔧 DEVELOPER UTILITIES (Debugging & Monitoring)

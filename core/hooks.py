@@ -8,21 +8,23 @@ Example usage:
 """
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 logger = logging.getLogger("telemetry_lab")
 
-_hooks: dict[str, list[Callable]] = {}
+HookCallback = Callable[..., None]
+
+_hooks: dict[str, list[HookCallback]] = {}
 
 
-def register_hook(hook_name: str, callback: Callable) -> None:
+def register_hook(hook_name: str, callback: HookCallback) -> None:
     """Register a callback for a hook."""
     if hook_name not in _hooks:
         _hooks[hook_name] = []
     _hooks[hook_name].append(callback)
 
 
-def run_hook(hook_name: str, *args, **kwargs) -> None:
+def run_hook(hook_name: str, *args: Any, **kwargs: Any) -> None:
     """Run all callbacks registered for a hook."""
     for callback in _hooks.get(hook_name, []):
         try:

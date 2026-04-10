@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
@@ -59,7 +60,7 @@ def get_allowed_hosts(debug: bool, *, require_when_not_debug: bool) -> list[str]
     return hosts
 
 
-def get_database_settings() -> tuple[str, dict[str, object]]:
+def get_database_settings() -> tuple[str, dict[str, Any]]:
     database_url = get_env_str("DATABASE_URL", required=True)
     try:
         database_config = dj_database_url.parse(database_url)
@@ -69,7 +70,7 @@ def get_database_settings() -> tuple[str, dict[str, object]]:
     if not database_config.get("ENGINE") or not database_config.get("NAME"):
         raise ImproperlyConfigured("DATABASE_URL is invalid")
 
-    return database_url, database_config
+    return database_url, cast(dict[str, Any], database_config)
 
 
 def get_eval_llm_provider() -> str:

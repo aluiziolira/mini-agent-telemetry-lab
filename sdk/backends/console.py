@@ -2,6 +2,8 @@
 
 import logging
 
+from sdk.types import TelemetrySpanDoc
+
 from .base import TelemetryBackend
 
 logger = logging.getLogger("telemetry_lab")
@@ -10,7 +12,7 @@ logger = logging.getLogger("telemetry_lab")
 class ConsoleBackend(TelemetryBackend):
     """Console backend for local debugging."""
 
-    def emit_span(self, span_doc: dict) -> None:
+    def emit_span(self, span_doc: TelemetrySpanDoc) -> None:
         attributes = span_doc.get("attributes", {})
         attribute_keys = sorted(attributes.keys()) if isinstance(attributes, dict) else []
         logger.info(
