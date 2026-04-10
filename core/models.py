@@ -65,13 +65,25 @@ class Span(models.Model):
 
 
 class Evaluation(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "pending"),
+        ("running", "running"),
+        ("completed", "completed"),
+        ("failed", "failed"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     trace_id = models.OneToOneField(Run, on_delete=models.CASCADE, related_name="evaluation")
-    correctness_score = models.IntegerField()
-    helpfulness_score = models.IntegerField()
-    aggregate_score = models.DecimalField(max_digits=3, decimal_places=2)
-    reasoning = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    correctness_score = models.IntegerField(null=True, blank=True)
+    helpfulness_score = models.IntegerField(null=True, blank=True)
+    aggregate_score = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    reasoning = models.TextField(null=True, blank=True)
     prompt_version = models.CharField(max_length=10, default="v1")
+    error_message = models.TextField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    duration_ms = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -83,6 +95,10 @@ class Evaluation(models.Model):
             models.CheckConstraint(
                 condition=models.Q(helpfulness_score__gte=1, helpfulness_score__lte=5),
                 name="evaluation_helpfulness_score_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(duration_ms__isnull=True) | models.Q(duration_ms__gte=0),
+                name="evaluation_duration_ms_non_negative",
             ),
         ]
 

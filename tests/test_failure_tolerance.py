@@ -162,7 +162,7 @@ def test_error_spans_do_not_prevent_run_completion(client, settings):
 
 
 @pytest.mark.django_db
-def test_evaluation_parse_failure_skips_score_without_crashing_worker():
+def test_evaluation_parse_failure_persists_failure_evidence_without_crashing_worker():
     run = Run.objects.create(
         agent_name="test_agent",
         status="completed",
@@ -203,7 +203,10 @@ def test_evaluation_parse_failure_skips_score_without_crashing_worker():
 
         evaluate_run.call_local(str(run.trace_id))
 
-    assert not Evaluation.objects.filter(trace_id=run).exists()
+    evaluation = Evaluation.objects.get(trace_id=run)
+    assert evaluation.status == "failed"
+    assert "parse" in evaluation.error_message.lower()
+    assert evaluation.aggregate_score is None
 
     run.refresh_from_db()
     assert run.eval_score is None

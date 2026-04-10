@@ -7,7 +7,9 @@ from core.models import MetricCounter
 
 METRIC_DESCRIPTIONS = {
     "spans_ingested_total": "Total number of spans ingested",
+    "eval_tasks_started_total": "Total number of evaluation tasks started",
     "eval_tasks_completed_total": "Total number of evaluation tasks completed",
+    "eval_tasks_failed_total": "Total number of evaluation tasks failed",
 }
 
 
@@ -40,6 +42,12 @@ class Metrics:
 
     def increment_eval_tasks_completed(self):
         self._increment("eval_tasks_completed_total")
+
+    def increment_eval_tasks_started(self):
+        self._increment("eval_tasks_started_total")
+
+    def increment_eval_tasks_failed(self):
+        self._increment("eval_tasks_failed_total")
 
     def get_prometheus_text(self):
         metric_values = self._get_metric_values()
