@@ -13,6 +13,7 @@ def test_first_span_creates_run(client, settings):
     settings.INGEST_API_KEY = "dev-ingest-key"
     trace_id = uuid.uuid4()
     span_id = uuid.uuid4()
+    now = timezone.now()
 
     response = client.post(
         reverse("ingest_span"),
@@ -21,8 +22,8 @@ def test_first_span_creates_run(client, settings):
             "trace_id": str(trace_id),
             "name": "test",
             "span_type": "chain",
-            "start_time": "2025-01-01T00:00:00Z",
-            "end_time": "2025-01-01T00:00:01Z",
+            "start_time": now.isoformat(),
+            "end_time": now.isoformat(),
             "status_code": "OK",
         },
         content_type="application/json",
@@ -39,6 +40,7 @@ def test_first_span_creates_run(client, settings):
 def test_final_span_completes_run(client, settings):
     settings.INGEST_API_KEY = "dev-ingest-key"
     trace_id = uuid.uuid4()
+    now = timezone.now()
 
     first_response = client.post(
         reverse("ingest_span"),
@@ -47,8 +49,8 @@ def test_final_span_completes_run(client, settings):
             "trace_id": str(trace_id),
             "name": "root",
             "span_type": "chain",
-            "start_time": "2025-01-01T00:00:00Z",
-            "end_time": "2025-01-01T00:00:01Z",
+            "start_time": now.isoformat(),
+            "end_time": now.isoformat(),
             "status_code": "OK",
             "attributes": {"prompt_tokens": 10, "completion_tokens": 5},
         },
@@ -63,9 +65,9 @@ def test_final_span_completes_run(client, settings):
             "span_id": str(uuid.uuid4()),
             "trace_id": str(trace_id),
             "name": "final",
-            "span_type": "llm",
-            "start_time": "2025-01-01T00:00:01Z",
-            "end_time": "2025-01-01T00:00:02Z",
+            "span_type": "chain",
+            "start_time": now.isoformat(),
+            "end_time": now.isoformat(),
             "status_code": "OK",
             "attributes": {"prompt_tokens": 20, "completion_tokens": 15},
             "is_final": True,
