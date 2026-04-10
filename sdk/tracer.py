@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
+import os
+import time
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 import httpx
+
+logger = logging.getLogger("telemetry_lab")
 
 
 class SpanContext(AbstractContextManager["SpanContext"]):
@@ -73,11 +78,17 @@ class Tracer:
         self.api_key = api_key
         self.agent_name = "unknown"
         self.run_id = str(uuid4())
-        self.client = httpx.Client(timeout=5.0)
+        self.timeout = float(os.getenv("TELEMETRY_TIMEOUT", "5.0"))
+        self.client = httpx.Client(timeout=self.timeout)
         self._stack: list[SpanContext] = []
         self._root_span_id: str | None = None
         self._finalize_root = False
         self._final_span_attrs: dict[str, Any] = {}
+        self._buffer: list[dict] = []
+        self._batch_size = int(os.getenv("TELEMETRY_BATCH_SIZE", "10"))
+        self._flush_interval = float(os.getenv("TELEMETRY_FLUSH_INTERVAL", "5.0"))
+        self._max_retries = int(os.getenv("TELEMETRY_MAX_RETRIES", "3"))
+        self._last_flush = time.time()
 
     def span(
         self,
@@ -91,14 +102,57 @@ class Tracer:
         )
 
     def _emit(self, span_doc: dict[str, Any]) -> None:
-        try:
-            self.client.post(
-                f"{self.base_url}/api/v1/ingest/span/",
-                headers={"X-API-Key": self.api_key},
-                json=span_doc,
-            ).raise_for_status()
-        except Exception:
-            print(f"[tracer] warn: failed to emit span {span_doc['name']}")
+        self._buffer.append(span_doc)
+        if (
+            len(self._buffer) >= self._batch_size
+            or time.time() - self._last_flush >= self._flush_interval
+        ):
+            self._flush_buffer()
+
+    def _flush_buffer(self) -> None:
+        if not self._buffer:
+            return
+        batch = self._buffer[:]
+        self._buffer = []
+        self._last_flush = time.time()
+        self._emit_batch_with_retry(batch)
+
+    def _emit_batch_with_retry(self, span_docs: list[dict]) -> None:
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self.client.post(
+                    f"{self.base_url}/api/v1/ingest/span/",
+                    headers={"X-API-Key": self.api_key},
+                    json=span_docs[0] if len(span_docs) == 1 else span_docs,
+                )
+                response.raise_for_status()
+                return
+            except httpx.HTTPStatusError as e:
+                if 400 <= e.response.status_code < 500:
+                    logger.warning(
+                        "Client error, not retrying",
+                        extra={
+                            "status_code": e.response.status_code,
+                            "attempt": attempt,
+                        },
+                    )
+                    return
+            except (httpx.TimeoutException, httpx.ConnectError):
+                pass
+            except Exception as e:
+                logger.warning(
+                    "Unexpected error, not retrying", extra={"error": str(e)}
+                )
+                return
+
+            if attempt < self._max_retries:
+                sleep_time = 0.1 * (2**attempt)
+                time.sleep(sleep_time)
+
+        logger.warning(
+            "Failed to emit spans after retries",
+            extra={"span_count": len(span_docs), "max_retries": self._max_retries},
+        )
 
     def finish(self, final_span_attrs: dict[str, Any] | None = None) -> None:
         if self._stack and self._root_span_id:
@@ -106,6 +160,7 @@ class Tracer:
             self._final_span_attrs = dict(final_span_attrs or {})
             return
 
+        self._flush_buffer()
         self._emit(
             {
                 "span_id": str(uuid4()),
@@ -121,3 +176,7 @@ class Tracer:
                 "is_final": True,
             }
         )
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        self._flush_buffer()
+        self.client.close()
