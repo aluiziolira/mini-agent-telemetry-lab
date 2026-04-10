@@ -9,7 +9,6 @@ from uuid import uuid4
 from sdk.backends.base import TelemetryBackend
 from sdk.backends.http import HTTPBackend
 
-
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
 
@@ -64,9 +63,7 @@ class Tracer:
     ) -> None:
         self.agent_name = "unknown"
         self.run_id = str(uuid4())
-        self.timeout = float(
-            os.getenv("TELEMETRY_TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS))
-        )
+        self.timeout = float(os.getenv("TELEMETRY_TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS)))
         self.backend = backend or HTTPBackend(base_url, api_key, timeout=self.timeout)
         self._stack: list[SpanContext] = []
         self._pending_spans: dict[str, dict[str, Any]] = {}
@@ -81,9 +78,7 @@ class Tracer:
         parent_span_id: str | None = None,
         attrs: dict[str, Any] | None = None,
     ) -> SpanContext:
-        return SpanContext(
-            self, name, span_type, parent_span_id=parent_span_id, attrs=attrs
-        )
+        return SpanContext(self, name, span_type, parent_span_id=parent_span_id, attrs=attrs)
 
     def _enter_span(self, span: SpanContext) -> None:
         self._stack.append(span)
@@ -121,9 +116,7 @@ class Tracer:
             "parent_span_id": span.parent_span_id,
             "name": span.name,
             "span_type": span.span_type,
-            "start_time": span.start_time.isoformat()
-            if span.start_time
-            else end_time.isoformat(),
+            "start_time": span.start_time.isoformat() if span.start_time else end_time.isoformat(),
             "end_time": end_time.isoformat(),
             "status_code": "ERROR" if error is not None else "OK",
             "attributes": payload,

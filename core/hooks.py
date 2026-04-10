@@ -7,9 +7,12 @@ Example usage:
     run_hook("post_ingest", span_data)
 """
 
-from typing import Any, Callable, Dict, List
+import logging
+from typing import Callable
 
-_hooks: Dict[str, List[Callable]] = {}
+logger = logging.getLogger("telemetry_lab")
+
+_hooks: dict[str, list[Callable]] = {}
 
 
 def register_hook(hook_name: str, callback: Callable) -> None:
@@ -25,4 +28,7 @@ def run_hook(hook_name: str, *args, **kwargs) -> None:
         try:
             callback(*args, **kwargs)
         except Exception as e:
-            print(f"[hook] error in {hook_name}: {e}")
+            logger.exception(
+                "Hook callback failed",
+                extra={"extra_fields": {"hook_name": hook_name, "error": str(e)}},
+            )

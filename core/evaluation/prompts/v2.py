@@ -1,9 +1,7 @@
 """Version 2 judge prompt - stricter correctness criteria."""
 
 
-def get_judge_prompt_v2(
-    user_query: str, final_answer: str, tool_summaries: list[str]
-) -> str:
+def get_judge_prompt_v2(user_query: str, final_answer: str, tool_summaries: list[str]) -> str:
     """Version 2 judge prompt with stricter rubric."""
     return (
         "You are grading an AI investment-assistant trace with STRICT criteria. "

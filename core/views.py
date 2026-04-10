@@ -1,25 +1,28 @@
+import importlib
 import json
+import logging
+import time
+import uuid as uuid_module
+from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import IntegrityError, connection
+from django.http import HttpResponse
+from django.utils import timezone
 from django.views.generic import DetailView, ListView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-import logging
 
 from core.hooks import run_hook
 from core.metrics import metrics
 from core.middleware.request_id import get_current_request_id
 from core.models import IdempotencyKey, Run, Span
 from core.serializers import SpanIngestSerializer
-from core.validators import validate_span_attributes, ValidationError
+from core.validators import ValidationError, validate_span_attributes
 
 logger = logging.getLogger("telemetry_lab")
-
-
-import time
-from collections import defaultdict
 
 _rate_limits = defaultdict(lambda: {"count": 0, "reset_time": 0})
 
@@ -72,9 +75,6 @@ class IngestSpanView(APIView):
         except ValidationError as e:
             return Response({"error": str(e)}, status=400)
 
-        from django.utils import timezone
-        from datetime import timedelta
-
         now = timezone.now()
         future_threshold = now + timedelta(minutes=1)
         past_threshold = now - timedelta(hours=24)
@@ -94,9 +94,7 @@ class IngestSpanView(APIView):
                 span_id=data["parent_span_id"],
             ).exists()
             if not parent_exists:
-                return Response(
-                    {"error": "parent_span_id not found in trace"}, status=400
-                )
+                return Response({"error": "parent_span_id not found in trace"}, status=400)
 
         if idempotency_key:
             IdempotencyKey.objects.create(key=idempotency_key)
@@ -109,8 +107,6 @@ class IngestSpanView(APIView):
                 "start_time": data["start_time"],
             },
         )
-
-        from django.db import IntegrityError
 
         try:
             span = Span.objects.create(
@@ -148,8 +144,7 @@ class IngestSpanView(APIView):
         if data.get("is_final"):
             spans = Span.objects.filter(trace_id=run)
             total_tokens = sum(
-                s.attributes.get("prompt_tokens", 0)
-                + s.attributes.get("completion_tokens", 0)
+                s.attributes.get("prompt_tokens", 0) + s.attributes.get("completion_tokens", 0)
                 for s in spans
             )
             total_cost = Decimal(total_tokens) * Decimal("0.000002")
@@ -159,8 +154,6 @@ class IngestSpanView(APIView):
             run.total_cost = total_cost
             run.save()
             response_data["run_status"] = "completed"
-
-        import uuid as uuid_module
 
         request_id = get_current_request_id() or str(uuid_module.uuid4())
         return Response(
@@ -241,8 +234,6 @@ class RunDetailView(DetailView):
 
 class HealthCheckView(APIView):
     def get(self, request):
-        from django.db import connection
-
         checks = {}
 
         try:
@@ -254,8 +245,7 @@ class HealthCheckView(APIView):
             checks["database"] = f"error: {str(e)}"
 
         try:
-            from huey.api import Huey
-
+            importlib.import_module("huey.api")
             checks["queue"] = "ok"
         except Exception as e:
             checks["queue"] = f"error: {str(e)}"
@@ -268,7 +258,6 @@ class HealthCheckView(APIView):
 
 class MetricsView(APIView):
     def get(self, request):
-        from django.http import HttpResponse
         return HttpResponse(
             metrics.get_prometheus_text(),
             content_type="text/plain; charset=utf-8",

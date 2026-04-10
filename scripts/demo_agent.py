@@ -1,25 +1,38 @@
 import atexit
+import logging
+import logging.config
 import os
 import random
 import re
 
 import yfinance as yf
 from ddgs import DDGS
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
 
-from demo_tools import run_tool_with_retries
+from scripts.demo_tools import run_tool_with_retries
 from sdk.tracer import Tracer
+from telemetry_lab.logging_config import get_logging_config
 
 load_dotenv()
+logging.config.dictConfig(get_logging_config())
+logger = logging.getLogger("telemetry_lab")
+
+ingest_api_key = os.environ.get("INGEST_API_KEY")
+if not ingest_api_key:
+    raise RuntimeError("INGEST_API_KEY is required to run scripts/demo_agent.py")
+
+llm_api_key = os.environ.get("LLM_API_KEY")
+if not llm_api_key:
+    raise RuntimeError("LLM_API_KEY is required to run scripts/demo_agent.py")
 
 tracer = Tracer(
     os.environ.get("TELEMETRY_BASE_URL", "http://127.0.0.1:8000"),
-    os.environ["INGEST_API_KEY"],
+    ingest_api_key,
 )
 tracer.agent_name = "research_analyst"
 atexit.register(tracer.shutdown)
-openai_client = OpenAI(api_key=os.environ["LLM_API_KEY"])
+openai_client = OpenAI(api_key=llm_api_key)
 
 
 def truncate(value, limit):
@@ -52,8 +65,7 @@ def _run_web_search(search_span, symbol):
 
     data = list(DDGS().text(f"{symbol} stock news", max_results=3))
     search_summary = truncate(
-        " | ".join(item.get("title", "") for item in data)
-        or "No search summary found.",
+        " | ".join(item.get("title", "") for item in data) or "No search summary found.",
         500,
     )
     search_span.set_attribute("output", search_summary)
@@ -88,11 +100,15 @@ if __name__ == "__main__":
         except Exception as exc:
             search_summary = f"Search unavailable: {exc}"
 
-        with tracer.span(
-            "synthesis_call", "llm", parent_span_id=root_span.span_id
-        ) as llm_span:
+        with tracer.span("synthesis_call", "llm", parent_span_id=root_span.span_id) as llm_span:
+            prompt_body = (
+                f"User question: {user_query}\n"
+                f"Stock data: {stock_data}\n"
+                f"Search summary: {search_summary}\n"
+                "Provide a concise grounded recommendation."
+            )
             prompt = truncate(
-                f"User question: {user_query}\nStock data: {stock_data}\nSearch summary: {search_summary}\nProvide a concise grounded recommendation.",
+                prompt_body,
                 2000,
             )
             response = openai_client.responses.create(model="gpt-4o-mini", input=prompt)
@@ -104,4 +120,12 @@ if __name__ == "__main__":
             llm_span.set_attribute("output", final_recommendation)
 
         tracer.finish({"output": final_recommendation})
-        print(final_recommendation)
+        logger.info(
+            "Demo agent completed",
+            extra={
+                "extra_fields": {
+                    "output_length": len(final_recommendation),
+                    "symbol": symbol,
+                }
+            },
+        )
