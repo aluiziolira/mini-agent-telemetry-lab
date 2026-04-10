@@ -1,0 +1,15 @@
+{% load core_extras %}
+<div id="span-{{ node.span.span_id }}" class="span-row rounded-lg border bg-slate-50 {% if node.span.status_code == 'ERROR' %}border-l-4 border-red-500{% else %}border-slate-200{% endif %}" style="padding-left: {{ depth|multiply:16 }}px;">
+  <div class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+    <a class="font-medium text-blue-700" href="#span-{{ node.span.span_id }}">{{ node.span.name }}</a>
+    <span class="rounded-full bg-slate-200 px-2 py-1 text-xs">{{ node.span.span_type }}</span>
+    <span class="rounded-full px-2 py-1 text-xs font-medium {% if node.span.status_code == 'OK' %}bg-green-100 text-green-700{% else %}bg-red-100 text-red-700{% endif %}">{{ node.span.status_code }}</span>
+    <span class="text-slate-500">{{ node.duration_ms|floatformat:2 }} ms</span>
+  </div>
+  <pre class="span-detail overflow-x-auto border-t bg-slate-950 px-4 py-3 text-xs text-slate-100">{{ node.attributes_json }}</pre>
+  <div class="space-y-3 py-3">
+    {% for child in node.children %}
+      {% include "core/partials/span_row.html" with node=child depth=depth|add:1 %}
+    {% endfor %}
+  </div>
+</div>

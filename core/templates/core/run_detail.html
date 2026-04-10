@@ -1,0 +1,40 @@
+{% extends "core/base.html" %}
+{% load core_extras %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="rounded-xl border bg-white p-6 shadow-sm">
+    <h1 class="text-2xl font-semibold">Run {{ object.trace_id }}</h1>
+    <div class="mt-4 grid gap-4 md:grid-cols-5 text-sm">
+      <div><span class="block text-slate-500">Latency</span><span>{% if run_latency_ms is not None %}{{ run_latency_ms|floatformat:2 }} ms{% else %}-{% endif %}</span></div>
+      <div><span class="block text-slate-500">Tokens</span><span>{{ object.total_tokens }}</span></div>
+      <div><span class="block text-slate-500">Cost</span><span>{{ object.total_cost }}</span></div>
+      <div><span class="block text-slate-500">Spans</span><span>{{ span_count }}</span></div>
+      <div><span class="block text-slate-500">Status</span><span class="rounded-full px-2 py-1 text-xs font-medium {% if object.status == 'completed' %}bg-green-100 text-green-700{% elif object.status == 'running' %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-700{% endif %}">{{ object.status }}</span></div>
+    </div>
+  </div>
+
+  <div class="rounded-xl border bg-white p-6 shadow-sm">
+    <h2 class="text-lg font-semibold">Span Tree</h2>
+    <div class="mt-4 space-y-3">
+      {% for node in span_tree %}
+        {% include "core/partials/span_row.html" with node=node depth=0 %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="rounded-xl border bg-white p-6 shadow-sm">
+    <h2 class="text-lg font-semibold">Evaluation</h2>
+    {% if evaluation %}
+      <div class="mt-4 grid gap-4 md:grid-cols-3 text-sm">
+        <div><span class="block text-slate-500">Correctness</span><span>{{ evaluation.correctness_score }}</span></div>
+        <div><span class="block text-slate-500">Helpfulness</span><span>{{ evaluation.helpfulness_score }}</span></div>
+        <div><span class="block text-slate-500">Aggregate</span><span>{{ evaluation.aggregate_score }}</span></div>
+      </div>
+      <p class="mt-4 text-sm text-slate-700">{{ evaluation.reasoning }}</p>
+    {% else %}
+      <p class="mt-4 text-sm text-slate-500">Evaluation pending.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

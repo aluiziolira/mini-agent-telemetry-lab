@@ -1,0 +1,42 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Runs</h1>
+    <div class="flex gap-4 text-sm text-slate-600">
+      <a href="?sort=-start_time">Date</a>
+      <a href="?sort=-total_cost">Cost</a>
+      <a href="?sort=-eval_score">Score</a>
+    </div>
+  </div>
+  <div class="overflow-hidden rounded-xl border bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-100 text-left text-slate-600">
+        <tr>
+          <th class="px-4 py-3">Agent</th>
+          <th class="px-4 py-3">Status</th>
+          <th class="px-4 py-3">Latency (ms)</th>
+          <th class="px-4 py-3">Tokens</th>
+          <th class="px-4 py-3">Cost</th>
+          <th class="px-4 py-3">Eval</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for row in run_rows %}
+        <tr class="hover:bg-slate-50">
+          <td class="px-4 py-3"><a class="font-medium text-blue-700" href="{% url 'run_detail' row.run.trace_id %}">{{ row.run.agent_name }}</a></td>
+          <td class="px-4 py-3">
+            <span class="rounded-full px-2 py-1 text-xs font-medium {% if row.run.status == 'completed' %}bg-green-100 text-green-700{% elif row.run.status == 'running' %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-700{% endif %}">{{ row.run.status }}</span>
+          </td>
+          <td class="px-4 py-3">{% if row.latency_ms is not None %}{{ row.latency_ms|floatformat:2 }}{% else %}-{% endif %}</td>
+          <td class="px-4 py-3">{{ row.run.total_tokens }}</td>
+          <td class="px-4 py-3">{{ row.run.total_cost }}</td>
+          <td class="px-4 py-3">{% if row.run.eval_score %}{{ row.run.eval_score }}{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
