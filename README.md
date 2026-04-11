@@ -7,7 +7,7 @@ An observability backend that turns opaque LLM agent pipelines into structured, 
 * **What it is:** A Django and PostgreSQL telemetry system that ingests, stores, and scores AI agent execution traces.
 * **Why it matters:** AI agents fail unpredictably. This project moves debugging away from unstructured console logs into a queryable relational schema.
 * **How it works:** A framework-agnostic Python tracer emits span data over HTTP to a backend that validates payloads strictly at the boundary before persistence.
-* **Why it is credible:** The architecture guarantees operational resilience through idempotent ingestion, immutable run semantics, and durable asynchronous evaluation that persists failure states.
+* **Why it is credible:** The architecture supports operational resilience through idempotent ingestion, immutable run semantics, and an asynchronous evaluation pipeline that persists failure states.
 
 ## Problem Statement
 
@@ -141,8 +141,8 @@ This project optimizes for engineering signal density and iteration speed. I cho
 
 * **Data Model:** An OTel inspired telemetry model maps `Run` (trace) and `Span` (step). A single SQL datastore with a JSON field on `Span.attributes` balances relational guarantees (indexes, transactional integrity) with telemetry flexibility (variable tool and LLM payloads).
 * **Ingestion Boundary:** DRF serializers validate incoming spans before persistence. They reject malformed payloads before they reach storage (`core/serializers.py`, `core/views.py`).
-* **Asynchronous Quality Loop:** The system evaluates completed runs with an LLM judge, stores explainable scores, and persists evaluation lifecycle evidence for success and failure paths (`core/tasks.py`, `core/models.py`).
-* **Queueing Choice:** I use **SqlHuey** for the asynchronous evaluation path. Ingestion persists spans first, and a SqlHuey worker later computes quality scores. This is the correct queue choice here. It cuts infrastructure overhead for a portfolio-scale system by reusing the PostgreSQL database, eliminating the need for a separate Redis or RabbitMQ instance.
+* **Asynchronous Quality Loop:** Completed runs are evaluated through a Huey task queue (`evaluate_run`), typically enqueued via `eval_pending` and executed by a Huey worker. The system stores explainable scores and persists evaluation lifecycle evidence for success and failure paths (`core/tasks.py`, `core/models.py`).
+* **Queueing Choice:** I use **SqlHuey** for the asynchronous evaluation path. Ingestion persists spans first, and a SqlHuey worker later computes quality scores after tasks are enqueued (for example via `just eval-pipeline`). This is the correct queue choice here. It cuts infrastructure overhead for a portfolio-scale system by reusing the PostgreSQL database, eliminating the need for a separate Redis or RabbitMQ instance.
 * **Framework Agnostic Instrumentation:** A custom Python tracer emits spans over HTTP without Django coupling. This allows usage from non-Django agent clients (`sdk/tracer.py`).
 
 ## Failure Modes I Designed For
