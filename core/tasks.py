@@ -90,7 +90,7 @@ def evaluate_run(trace_id: UUID) -> None:
     evaluation, _ = Evaluation.objects.get_or_create(trace_id=run)
     _reset_evaluation(evaluation, prompt_version=prompt_version, started_at=started_at)
 
-    spans = list(run.spans.order_by("start_time"))
+    spans = list(run.spans.order_by("start_time"))  # type: ignore[attr-defined]
     if not spans:
         _fail_evaluation(
             evaluation=evaluation,

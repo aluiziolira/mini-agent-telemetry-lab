@@ -50,7 +50,7 @@ class Command(BaseCommand):
         self.stdout.write("")
 
         for index, run in enumerate(runs, start=1):
-            spans = sorted(run.spans.all(), key=lambda span: span.start_time)
+            spans = sorted(run.spans.all(), key=lambda span: span.start_time)  # type: ignore[attr-defined]
             total_latency_ms = _duration_ms(run.start_time, run.end_time)
             eval_score = run.eval_score if run.eval_score is not None else "pending"
 
