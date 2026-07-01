@@ -1,6 +1,5 @@
 """Database-backed metrics counters for observability."""
 
-from django.db import IntegrityError
 from django.db.models import F
 
 from core.models import MetricCounter
@@ -17,10 +16,7 @@ class Metrics:
     """Database-backed metrics store."""
 
     def _ensure_counter_exists(self, metric_name: str) -> None:
-        try:
-            MetricCounter.objects.get_or_create(name=metric_name)
-        except IntegrityError:
-            pass
+        MetricCounter.objects.get_or_create(name=metric_name)
 
     def _increment(self, metric_name: str) -> None:
         self._ensure_counter_exists(metric_name)
