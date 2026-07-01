@@ -53,6 +53,9 @@ class SpanTreeNode(TypedDict):
     attributes_json: str
 
 
+# In-memory rate limiter for the dev/portfolio scope.
+# Does NOT survive gunicorn worker forks or multi-process deployments.
+# In production this would be backed by Redis or a cache with atomic counters.
 _rate_limits: defaultdict[str, RateLimitBucket] = defaultdict(
     lambda: {"count": 0, "reset_time": 0.0}
 )
