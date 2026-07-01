@@ -3,6 +3,10 @@ from decimal import Decimal
 
 from core.models import Run, Span
 
+# $2.00 per 1M tokens (GPT-4o-mini pricing).
+# In production, this would be provider-specific and configurable via settings.
+_COST_PER_TOKEN = Decimal("0.000002")
+
 
 def finalize_run_if_needed(*, run: Run, is_final: bool, end_time: datetime) -> bool:
     if not is_final:
@@ -16,7 +20,7 @@ def finalize_run_if_needed(*, run: Run, is_final: bool, end_time: datetime) -> b
         span.attributes.get("prompt_tokens", 0) + span.attributes.get("completion_tokens", 0)
         for span in spans
     )
-    total_cost = Decimal(total_tokens) * Decimal("0.000002")
+    total_cost = Decimal(total_tokens) * _COST_PER_TOKEN
 
     run.status = "completed"
     run.end_time = end_time

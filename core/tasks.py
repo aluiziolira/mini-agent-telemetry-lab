@@ -1,5 +1,7 @@
 import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable, TypeVar, cast
 from uuid import UUID
@@ -10,7 +12,7 @@ from huey.contrib.djhuey import db_task
 
 from core.evaluation.prompts.v1 import get_judge_prompt_v1
 from core.metrics import metrics
-from core.models import Evaluation, Run
+from core.models import Evaluation, Run, Span
 from core.providers.factory import create_llm_provider
 
 logger = logging.getLogger("telemetry_lab")
@@ -34,6 +36,37 @@ def _typed_db_task() -> Callable[[TaskFunc], TaskFunc]:
 #
 # The management command `eval_pending` below is the synchronous equivalent.
 # ----------------------------
+
+
+def _elapsed_ms(start: datetime, end: datetime) -> int:
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
+@dataclass
+class _SpanContent:
+    user_query: str
+    final_answer: str
+    tool_summaries: list[str]
+
+
+def _extract_span_content(spans: list[Span]) -> _SpanContent:
+    """Walk spans to extract the user query, final answer, and tool call summaries."""
+    user_query = next(
+        (s.attributes.get("input", "") for s in spans if s.span_type == "chain"),
+        "",
+    )
+    final_answer = next(
+        (s.attributes.get("output", "") for s in spans if s.span_type == "llm"),
+        "",
+    )
+    tool_summaries = [
+        f"{s.name}: {str(s.attributes.get('output', s.attributes.get('error_message', '')))[:200]}"
+        for s in spans
+        if s.span_type == "tool"
+    ]
+    return _SpanContent(
+        user_query=user_query, final_answer=final_answer, tool_summaries=tool_summaries
+    )
 
 
 @_typed_db_task()
@@ -62,78 +95,28 @@ def evaluate_run(trace_id: UUID) -> None:
     )
 
     evaluation, _ = Evaluation.objects.get_or_create(trace_id=run)
-    evaluation.status = "running"
-    evaluation.prompt_version = prompt_version
-    evaluation.error_message = None
-    evaluation.started_at = started_at
-    evaluation.completed_at = None
-    evaluation.duration_ms = None
-    evaluation.correctness_score = None
-    evaluation.helpfulness_score = None
-    evaluation.aggregate_score = None
-    evaluation.reasoning = None
-    evaluation.save(
-        update_fields=[
-            "status",
-            "prompt_version",
-            "error_message",
-            "started_at",
-            "completed_at",
-            "duration_ms",
-            "correctness_score",
-            "helpfulness_score",
-            "aggregate_score",
-            "reasoning",
-        ]
-    )
+    _reset_evaluation(evaluation, prompt_version=prompt_version, started_at=started_at)
 
     spans = list(run.spans.order_by("start_time"))
     if not spans:
-        completed_at = timezone.now()
-        duration_ms = max(0, int((completed_at - started_at).total_seconds() * 1000))
-
-        evaluation.status = "failed"
-        evaluation.error_message = "Run has no spans"
-        evaluation.completed_at = completed_at
-        evaluation.duration_ms = duration_ms
-        evaluation.save(update_fields=["status", "error_message", "completed_at", "duration_ms"])
-
-        run.eval_score = None
-        run.save(update_fields=["eval_score"])
-
-        metrics.increment_eval_tasks_failed()
-        logger.warning(
-            "Evaluation failed",
-            extra={
-                "trace_id": str(trace_id),
-                "extra_fields": {
-                    "outcome": "failed",
-                    "prompt_version": prompt_version,
-                    "provider": provider_name,
-                    "duration_ms": duration_ms,
-                    "failure_class": "ValueError",
-                    "failure_message": "Run has no spans",
-                },
-            },
+        _fail_evaluation(
+            evaluation=evaluation,
+            run=run,
+            started_at=started_at,
+            trace_id=trace_id,
+            prompt_version=prompt_version,
+            provider_name=provider_name,
+            error_message="Run has no spans",
+            failure_class="ValueError",
         )
         return
 
-    user_query = next(
-        (s.attributes.get("input", "") for s in spans if s.span_type == "chain"),
-        "",
-    )
-    final_answer = next(
-        (s.attributes.get("output", "") for s in spans if s.span_type == "llm"),
-        "",
-    )
-    tool_summaries = [
-        f"{s.name}: {str(s.attributes.get('output', s.attributes.get('error_message', '')))[:200]}"
-        for s in spans
-        if s.span_type == "tool"
-    ]
+    content = _extract_span_content(spans)
 
     try:
-        prompt = get_judge_prompt_v1(user_query, final_answer, tool_summaries)
+        prompt = get_judge_prompt_v1(
+            content.user_query, content.final_answer, content.tool_summaries
+        )
 
         provider = create_llm_provider()
         response_text = provider.create_completion(
@@ -147,76 +130,159 @@ def evaluate_run(trace_id: UUID) -> None:
         parsed = json.loads(response_text)
         aggregate_score = Decimal(str((parsed["correctness"] + parsed["helpfulness"]) / 2))
 
-        completed_at = timezone.now()
-        duration_ms = max(0, int((completed_at - started_at).total_seconds() * 1000))
-
-        evaluation.status = "completed"
-        evaluation.correctness_score = parsed["correctness"]
-        evaluation.helpfulness_score = parsed["helpfulness"]
-        evaluation.aggregate_score = aggregate_score
-        evaluation.reasoning = parsed["reasoning"]
-        evaluation.error_message = None
-        evaluation.completed_at = completed_at
-        evaluation.duration_ms = duration_ms
-        evaluation.save(
-            update_fields=[
-                "status",
-                "correctness_score",
-                "helpfulness_score",
-                "aggregate_score",
-                "reasoning",
-                "error_message",
-                "completed_at",
-                "duration_ms",
-            ]
-        )
-
-        run.eval_score = aggregate_score
-        run.save(update_fields=["eval_score"])
-
-        metrics.increment_eval_tasks_completed()
-        logger.info(
-            "Evaluation completed",
-            extra={
-                "trace_id": str(trace_id),
-                "extra_fields": {
-                    "outcome": "completed",
-                    "prompt_version": prompt_version,
-                    "provider": provider_name,
-                    "duration_ms": duration_ms,
-                    "eval_score": str(aggregate_score),
-                },
-            },
+        _complete_evaluation(
+            evaluation=evaluation,
+            run=run,
+            started_at=started_at,
+            trace_id=trace_id,
+            prompt_version=prompt_version,
+            provider_name=provider_name,
+            aggregate_score=aggregate_score,
+            correctness=parsed["correctness"],
+            helpfulness=parsed["helpfulness"],
+            reasoning=parsed["reasoning"],
         )
     except Exception as exc:
-        completed_at = timezone.now()
-        duration_ms = max(0, int((completed_at - started_at).total_seconds() * 1000))
-
         failure_message = str(exc)
         if isinstance(exc, json.JSONDecodeError):
             failure_message = "Failed to parse judge response as JSON"
-
-        evaluation.status = "failed"
-        evaluation.error_message = failure_message
-        evaluation.completed_at = completed_at
-        evaluation.duration_ms = duration_ms
-        evaluation.save(update_fields=["status", "error_message", "completed_at", "duration_ms"])
-
-        run.eval_score = None
-        run.save(update_fields=["eval_score"])
-
-        metrics.increment_eval_tasks_failed()
-        logger.warning(
-            "Evaluation failed",
-            extra={
-                "trace_id": str(trace_id),
-                "extra_fields": {
-                    "outcome": "failed",
-                    "prompt_version": prompt_version,
-                    "provider": provider_name,
-                    "duration_ms": duration_ms,
-                    "failure_class": exc.__class__.__name__,
-                    "failure_message": failure_message,
-                },
-            },
+        _fail_evaluation(
+            evaluation=evaluation,
+            run=run,
+            started_at=started_at,
+            trace_id=trace_id,
+            prompt_version=prompt_version,
+            provider_name=provider_name,
+            error_message=failure_message,
+            failure_class=exc.__class__.__name__,
         )
+
+
+# ---------------------------------------------------------------------------
+# Evaluation helpers
+# ---------------------------------------------------------------------------
+
+_EVALUATION_RESET_FIELDS = [
+    "status",
+    "prompt_version",
+    "error_message",
+    "started_at",
+    "completed_at",
+    "duration_ms",
+    "correctness_score",
+    "helpfulness_score",
+    "aggregate_score",
+    "reasoning",
+]
+
+_EVALUATION_COMPLETED_FIELDS = [
+    "status",
+    "correctness_score",
+    "helpfulness_score",
+    "aggregate_score",
+    "reasoning",
+    "error_message",
+    "completed_at",
+    "duration_ms",
+]
+
+_EVALUATION_FAILED_FIELDS = ["status", "error_message", "completed_at", "duration_ms"]
+
+
+def _reset_evaluation(evaluation: Evaluation, *, prompt_version: str, started_at: datetime) -> None:
+    evaluation.status = "running"
+    evaluation.prompt_version = prompt_version
+    evaluation.started_at = started_at
+    evaluation.error_message = None
+    evaluation.completed_at = None
+    evaluation.duration_ms = None
+    evaluation.correctness_score = None
+    evaluation.helpfulness_score = None
+    evaluation.aggregate_score = None
+    evaluation.reasoning = None
+    evaluation.save(update_fields=_EVALUATION_RESET_FIELDS)
+
+
+def _complete_evaluation(
+    *,
+    evaluation: Evaluation,
+    run: Run,
+    started_at: datetime,
+    trace_id: UUID,
+    prompt_version: str,
+    provider_name: str,
+    aggregate_score: Decimal,
+    correctness: int,
+    helpfulness: int,
+    reasoning: str,
+) -> None:
+    completed_at = timezone.now()
+    duration_ms = _elapsed_ms(started_at, completed_at)
+
+    evaluation.status = "completed"
+    evaluation.correctness_score = correctness
+    evaluation.helpfulness_score = helpfulness
+    evaluation.aggregate_score = aggregate_score
+    evaluation.reasoning = reasoning
+    evaluation.error_message = None
+    evaluation.completed_at = completed_at
+    evaluation.duration_ms = duration_ms
+    evaluation.save(update_fields=_EVALUATION_COMPLETED_FIELDS)
+
+    run.eval_score = aggregate_score
+    run.save(update_fields=["eval_score"])
+
+    metrics.increment_eval_tasks_completed()
+    logger.info(
+        "Evaluation completed",
+        extra={
+            "trace_id": str(trace_id),
+            "extra_fields": {
+                "outcome": "completed",
+                "prompt_version": prompt_version,
+                "provider": provider_name,
+                "duration_ms": duration_ms,
+                "eval_score": str(aggregate_score),
+            },
+        },
+    )
+
+
+def _fail_evaluation(
+    *,
+    evaluation: Evaluation,
+    run: Run,
+    started_at: datetime,
+    trace_id: UUID,
+    prompt_version: str,
+    provider_name: str,
+    error_message: str,
+    failure_class: str,
+) -> None:
+    completed_at = timezone.now()
+    duration_ms = _elapsed_ms(started_at, completed_at)
+
+    evaluation.status = "failed"
+    evaluation.error_message = error_message
+    evaluation.completed_at = completed_at
+    evaluation.duration_ms = duration_ms
+    evaluation.save(update_fields=_EVALUATION_FAILED_FIELDS)
+
+    run.eval_score = None
+    run.save(update_fields=["eval_score"])
+
+    metrics.increment_eval_tasks_failed()
+    logger.warning(
+        "Evaluation failed",
+        extra={
+            "trace_id": str(trace_id),
+            "extra_fields": {
+                "outcome": "failed",
+                "prompt_version": prompt_version,
+                "provider": provider_name,
+                "duration_ms": duration_ms,
+                "failure_class": failure_class,
+                "failure_message": error_message,
+            },
+        },
+    )

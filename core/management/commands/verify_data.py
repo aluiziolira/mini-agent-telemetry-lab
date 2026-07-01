@@ -17,15 +17,15 @@ class Command(BaseCommand):
         spans = Span.objects.all()
         trace_spans = {}
         for span in spans:
-            if span.trace_id_id not in trace_spans:
-                trace_spans[span.trace_id_id] = set()
-            trace_spans[span.trace_id_id].add(str(span.span_id))
+            if span.trace_id_id not in trace_spans:  # type: ignore[attr-defined]
+                trace_spans[span.trace_id_id] = set()  # type: ignore[attr-defined]
+            trace_spans[span.trace_id_id].add(str(span.span_id))  # type: ignore[attr-defined]
 
         for span in spans:
             if span.parent_span_id:
-                parent_exists = str(span.parent_span_id) in trace_spans.get(span.trace_id_id, set())
+                parent_exists = str(span.parent_span_id) in trace_spans.get(span.trace_id_id, set())  # type: ignore[attr-defined]
                 if not parent_exists:
-                    issues.append(f"Orphaned span {span.span_id} in trace {span.trace_id_id}")
+                    issues.append(f"Orphaned span {span.span_id} in trace {span.trace_id_id}")  # type: ignore[attr-defined]
 
         runs_with_spans = set(Span.objects.values_list("trace_id", flat=True))
         for run in Run.objects.all():
