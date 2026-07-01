@@ -261,7 +261,10 @@ def test_hook_failure_does_not_block_persistence_or_success_response(client, set
     span_id = uuid.uuid4()
     now = timezone.now()
 
-    with patch("core.views.run_hook", side_effect=RuntimeError("hook broke")):
+    with (
+        patch("core.views.run_hook", side_effect=RuntimeError("hook broke")),
+        patch("core.services.ingestion.logger") as mock_logger,
+    ):
         response = _ingest(
             client,
             api_key="dev-ingest-key",
@@ -278,3 +281,15 @@ def test_hook_failure_does_not_block_persistence_or_success_response(client, set
 
     assert response.status_code == 201
     assert Span.objects.filter(span_id=span_id).exists()
+
+    mock_logger.exception.assert_called_once()
+    log_call = mock_logger.exception.call_args
+    assert log_call.args[0] == "Post-ingest hook failed (ingestion unaffected)"
+    assert log_call.kwargs["extra"] == {
+        "trace_id": str(trace_id),
+        "span_id": str(span_id),
+        "extra_fields": {
+            "failure_class": "RuntimeError",
+            "failure_message": "hook broke",
+        },
+    }

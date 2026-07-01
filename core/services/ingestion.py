@@ -71,12 +71,19 @@ def ingest_span(
             "post_ingest",
             {"span_id": str(span.span_id), "trace_id": str(data["trace_id"])},
         )
-    except Exception:
+    except Exception as exc:
         # Isolate hook failures from ingestion success path,
         # but still surface them for observability.
         logger.exception(
             "Post-ingest hook failed (ingestion unaffected)",
-            extra={"extra_fields": {"span_id": str(data["span_id"])}},
+            extra={
+                "trace_id": str(data["trace_id"]),
+                "span_id": str(data["span_id"]),
+                "extra_fields": {
+                    "failure_class": exc.__class__.__name__,
+                    "failure_message": str(exc),
+                },
+            },
         )
 
     metrics.increment_spans_ingested()

@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Callable, TypeVar, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -15,6 +16,12 @@ from core.models import Evaluation, Run, Span
 from core.providers.factory import create_llm_provider
 
 logger = logging.getLogger("telemetry_lab")
+
+TaskFunc = TypeVar("TaskFunc", bound=Callable[..., Any])
+
+
+def _typed_db_task() -> Callable[[TaskFunc], TaskFunc]:
+    return cast(Callable[[TaskFunc], TaskFunc], db_task())
 
 
 # --- PRODUCTION PATH NOTE ---
@@ -62,7 +69,7 @@ def _extract_span_content(spans: list[Span]) -> _SpanContent:
     )
 
 
-@db_task()
+@_typed_db_task()
 def evaluate_run(trace_id: UUID) -> None:
     prompt_version = "v1"
     provider_name = settings.EVAL_LLM_PROVIDER
@@ -90,7 +97,7 @@ def evaluate_run(trace_id: UUID) -> None:
     evaluation, _ = Evaluation.objects.get_or_create(trace_id=run)
     _reset_evaluation(evaluation, prompt_version=prompt_version, started_at=started_at)
 
-    spans = list(run.spans.order_by("start_time"))  # type: ignore[attr-defined]
+    spans = list(run.spans.order_by("start_time"))
     if not spans:
         _fail_evaluation(
             evaluation=evaluation,

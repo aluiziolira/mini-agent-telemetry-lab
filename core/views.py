@@ -200,7 +200,7 @@ class RunDetailView(BaseRunDetailView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         ctx = super().get_context_data(**kwargs)
-        spans = list(self.object.spans.order_by("start_time"))  # type: ignore[attr-defined]
+        spans = list(self.object.spans.order_by("start_time"))
         ctx["span_tree"] = build_span_tree(spans)
         ctx["span_count"] = len(spans)
         ctx["evaluation"] = getattr(self.object, "evaluation", None)
