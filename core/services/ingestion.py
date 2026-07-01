@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from typing import Callable
 
@@ -15,6 +16,8 @@ from core.services.exceptions import (
 from core.services.finalization import finalize_run_if_needed
 from core.types import IngestSpanResult, PostIngestPayload, SpanIngestData
 from core.validators import ValidationError, validate_span_attributes
+
+logger = logging.getLogger("telemetry_lab")
 
 
 def ingest_span(
@@ -69,8 +72,12 @@ def ingest_span(
             {"span_id": str(span.span_id), "trace_id": str(data["trace_id"])},
         )
     except Exception:
-        # Isolate hook failures from ingestion success path.
-        pass
+        # Isolate hook failures from ingestion success path,
+        # but still surface them for observability.
+        logger.exception(
+            "Post-ingest hook failed (ingestion unaffected)",
+            extra={"extra_fields": {"span_id": str(data["span_id"])}},
+        )
 
     metrics.increment_spans_ingested()
 
