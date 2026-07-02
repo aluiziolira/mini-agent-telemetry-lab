@@ -7,15 +7,15 @@ An observability backend that turns opaque LLM agent pipelines into structured, 
 * **What it is:** A Django and PostgreSQL telemetry system that ingests, stores, and scores AI agent execution traces.
 * **Why it matters:** AI agents fail unpredictably. This project moves debugging away from unstructured console logs into a queryable relational schema.
 * **How it works:** A framework-agnostic Python tracer emits span data over HTTP to a backend that validates payloads strictly at the boundary before persistence.
-* **Why it is credible:** The architecture supports operational resilience through idempotent ingestion, immutable run semantics, and an asynchronous evaluation pipeline that persists failure states.
+* **Why it is credible:** Ingestion is idempotent, completed runs are immutable, and the asynchronous evaluation pipeline persists its failures for inspection instead of dropping them.
 
 ## Problem Statement
 
-Most AI demo projects and initial generative AI deployments successfully generate text, but completely fail to explain *why* a response was slow, factually incorrect, or brittle. When an agent pipeline misbehaves, engineering teams are left sifting through unstructured console logs. Without structured span-level telemetry, teams cannot isolate whether system degradation stems from upstream model latency, a malformed tool execution payload, degraded prompt construction, or flawed orchestration logic. This observability gap prevents iterative quality improvement and turns maintenance into guesswork.
+Most AI demos and early generative AI deployments can produce text but cannot explain *why* a response was slow, wrong, or brittle. When an agent pipeline misbehaves, engineers are left sifting through unstructured console logs. Without span-level telemetry, they cannot tell whether degradation comes from model latency, a malformed tool payload, poor prompt construction, or flawed orchestration. That gap turns quality work into guesswork.
 
 ## Demo Workflow
 
-The system generates inspectable evidence of execution steps, retries, timing, cost, and quality signals in one backend.
+Every run produces inspectable evidence — execution steps, retries, timing, cost, and quality scores — in one backend.
 
 ![Demo](assets/demo.gif)
 
@@ -25,13 +25,13 @@ The system generates inspectable evidence of execution steps, retries, timing, c
 
 ## Technical Decisions & Tradeoffs
 
-The architecture demonstrates production reasoning under constraint. The system captures first, validates early, computes asynchronously, and preserves enough context to explain system behavior under failure.
+The system captures first, validates early, computes asynchronously, and preserves enough context to explain its own behavior under failure.
 
-| Tradeoff                           | Decision                                                      | Defensibility                                                                                                                                                                      |
+| Tradeoff                           | Decision                                                      | Rationale                                                                                                                                                                          |
 | ---------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Latency vs. Consistency**        | Synchronous span POST in tracer and fail open on emit error.  | Keeps instrumentation simple. Ensures agent execution is never blocked by telemetry transport failures.                                                                            |
 | **SQL vs. NoSQL**                  | Single SQL datastore with JSON fields.                        | Preserves relational tooling and query power while retaining flexible span payload schemas. Avoids the integration drag of a separate document database.                           |
-| **Operational Simplicity**         | SqlHuey and PostgreSQL backend over Celery and Redis.         | Perfectly scoped for a portfolio project. It provides reliable queueing without massive infrastructure overhead. A documented production migration path exists in `core/tasks.py`. |
+| **Operational Simplicity**         | SqlHuey and PostgreSQL backend over Celery and Redis.         | Reliable queueing with no extra infrastructure at this scale. A documented production migration path exists in `core/tasks.py`.                                                    |
 | **Strict Schema vs. Adaptability** | Fixed top level span fields plus a JSON `attributes` payload. | Protects core query patterns (tokens, cost) while allowing rapid evolution of model or tool metadata capture.                                                                      |
 
 ### Backend Best Practices
@@ -117,7 +117,7 @@ The application validates its environment on startup and fails fast if required 
 
 Required variables:
 * `DJANGO_SECRET_KEY`: Cryptographic signing key.
-* `INGEST_API_KEY`: Authentic key required for span ingestion.
+* `INGEST_API_KEY`: Authentication key required for span ingestion.
 * `DATABASE_URL`: PostgreSQL connection string.
 * `EVAL_LLM_PROVIDER`: Evaluator model provider (defaults to `openai`).
 * `LLM_API_KEY`: Required only if the chosen evaluation provider needs one.
@@ -137,12 +137,12 @@ Optional overrides:
 
 ## Architecture & Data Model
 
-This project optimizes for engineering signal density and iteration speed. I chose a Django monolith with DRF ingestion to enforce schema boundaries at ingress.
+This project optimizes for clarity and iteration speed. I chose a Django monolith with DRF ingestion to enforce schema boundaries at ingress.
 
 * **Data Model:** An OTel inspired telemetry model maps `Run` (trace) and `Span` (step). A single SQL datastore with a JSON field on `Span.attributes` balances relational guarantees (indexes, transactional integrity) with telemetry flexibility (variable tool and LLM payloads).
 * **Ingestion Boundary:** DRF serializers validate incoming spans before persistence. They reject malformed payloads before they reach storage (`core/serializers.py`, `core/views.py`).
 * **Asynchronous Quality Loop:** Completed runs are evaluated through a Huey task queue (`evaluate_run`), typically enqueued via `eval_pending` and executed by a Huey worker. The system stores explainable scores and persists evaluation lifecycle evidence for success and failure paths (`core/tasks.py`, `core/models.py`).
-* **Queueing Choice:** I use **SqlHuey** for the asynchronous evaluation path. Ingestion persists spans first, and a SqlHuey worker later computes quality scores after tasks are enqueued (for example via `just eval-pipeline`). This is the correct queue choice here. It cuts infrastructure overhead for a portfolio-scale system by reusing the PostgreSQL database, eliminating the need for a separate Redis or RabbitMQ instance.
+* **Queueing Choice:** I use **SqlHuey** for the asynchronous evaluation path. Ingestion persists spans first, and a SqlHuey worker later computes quality scores after tasks are enqueued (for example via `just eval-pipeline`). Reusing PostgreSQL as the queue backend removes the need for a separate Redis or RabbitMQ instance at this scale.
 * **Framework Agnostic Instrumentation:** A custom Python tracer emits spans over HTTP without Django coupling. This allows usage from non-Django agent clients (`sdk/tracer.py`).
 
 ## Failure Modes I Designed For
@@ -161,7 +161,7 @@ A telemetry system is only useful if it behaves predictably when things go wrong
 
 ## Validated Technical Capabilities
 
-The project includes an automated test suite verifying both domain logic and operational resilience, tailored to demonstrate production-ready problem solving.
+The automated test suite covers both domain logic and operational resilience.
 
 | Implementation Detail           | Evidence                                                      | Why It Matters for Production                                                                                             |
 | :------------------------------ | :------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------ |
@@ -199,4 +199,4 @@ If this were expanded beyond portfolio scope, the next steps would be:
 - extend metrics and dashboards for queue latency and evaluator health
 - add retention and archival policies for long-lived telemetry data
 
-I intentionally did **not** build those here because the current design is optimized for clarity, correctness, and defensible tradeoffs at demo scale.
+I intentionally did **not** build those here: at demo scale they would add operational surface without adding correctness or clarity.
