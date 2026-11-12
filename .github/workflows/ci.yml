@@ -42,6 +42,20 @@ jobs:
 
   lint-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: telemetry_lab_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -66,5 +80,11 @@ jobs:
       - name: MyPy typecheck
         run: uv run mypy
 
-      - name: Run tests
+      - name: Run tests (SQLite)
         run: uv run pytest -q
+
+      - name: Run PostgreSQL concurrency tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/telemetry_lab_test
+        run: uv run pytest -q -m postgres
+

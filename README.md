@@ -149,15 +149,16 @@ This project optimizes for clarity and iteration speed. I chose a Django monolit
 
 A telemetry system is only useful if it behaves predictably when things go wrong. This project explicitly handles and tests several failure modes:
 
-| Failure Mode                         | Behavior                                                      | Why It Matters                                                              |
-| ------------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Duplicate ingestion request          | Idempotency key prevents duplicate span persistence           | Protects metrics and run history from replay drift                          |
-| New span after run completion        | Rejected with `409` and no run mutation                       | Makes completion semantics explicit and stable                              |
-| Telemetry transport error from agent | Tracer fails open and agent execution continues               | Observability should not break primary workload execution                   |
-| Hook callback failure                | Span ingestion still succeeds; hook error is logged           | Optional extension points should not compromise ingestion durability        |
-| Evaluation JSON parse failure        | Failure state is persisted on the `Evaluation` record         | Background failures remain queryable instead of silently disappearing       |
-| Evaluation provider exception        | Failure evidence, timestamps, and error message are persisted | Makes async debugging operationally tractable                               |
-| Error spans inside a run             | Run can still complete and be evaluated                       | Real systems degrade; they do not require perfect runs to remain observable |
+| Failure Mode                              | Behavior                                                                                         | Why It Matters                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Malformed span attributes                 | Rejected with `400` before persistence (including non-integer token fields on any span type)     | Keeps bad payloads out of storage and prevents finalization crashes         |
+| Duplicate ingestion (same key + payload)  | Returns the original span result without a second write                                          | Protects metrics and run history from replay drift                          |
+| Idempotency key reused with new payload   | Rejected with `409` conflict                                                                     | Prevents silent acceptance of divergent retries under one key               |
+| New span after run completion             | Rejected with `409`; run row is locked during ingest/finalization                                | Makes completion semantics explicit under concurrent writers                |
+| Post-commit metrics/hook failure          | Logged; ingest still returns success                                                             | Observability side effects must not undo a durable write                    |
+| Telemetry transport / 5xx / 429 from agent| SDK retries with backoff (same idempotency key), then fails open                                 | Observability should not break primary workload execution                   |
+| Evaluation preparation or judge failure   | `Evaluation` status set to `failed` with error details (no stuck `running` state)                | Background failures remain queryable instead of silently disappearing       |
+| Error spans inside a run                  | Run can still complete and be evaluated                                                          | Real systems degrade; they do not require perfect runs to remain observable |
 
 ## Validated Technical Capabilities
 
@@ -165,9 +166,9 @@ The automated test suite covers both domain logic and operational resilience.
 
 | Implementation Detail           | Evidence                                                      | Why It Matters for Production                                                                                             |
 | :------------------------------ | :------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------ |
-| **Atomic Idempotent Ingestion** | `tests/test_ingest_semantics.py`                              | Prevents duplicate telemetry writes during agent retry or network replay scenarios, ensuring data integrity.              |
-| **Immutable Run Semantics**     | `tests/test_lifecycle.py`, `tests/test_ingest_semantics.py`   | Locks telemetry after finalization while maintaining stable token/cost rollups, preventing mutation drift.                |
-| **Durable Async Failures**      | `tests/test_evaluation.py`, `tests/test_failure_tolerance.py` | LLM evaluation failures are caught and persisted as queryable state, not lost in silent background crashes.               |
+| **Atomic Idempotent Ingestion** | `tests/test_ingest_semantics.py`                              | Same key + payload replays return the original result; divergent payloads under one key conflict with `409`.              |
+| **Immutable Run Semantics**     | `tests/test_lifecycle.py`, `tests/test_finalization_concurrency.py` | Row-locked finalization; late spans after completion are rejected without mutating totals.                          |
+| **Durable Async Failures**      | `tests/test_evaluation.py`, `tests/test_failure_tolerance.py` | Preparation and judge failures persist `failed` status; scoring uses the final LLM span output.                           |
 | **Deterministic Cost Rollups**  | `core/services/finalization.py` (Decimal math)                | Calculates agent financial cost reliably, avoiding floating-point errors common in naive estimations.                     |
 | **Hierarchical Trace Assembly** | `tests/test_lifecycle.py`                                     | Successfully reconstructs N-depth parent/child execution graphs, enabling precise root-cause analysis for agent failures. |
 
@@ -189,14 +190,20 @@ just raw-agent-technical
 
 That side-by-side contrast is the framework-agnostic proof: multiple agent styles and scenarios, one telemetry pipeline.
 
+## Remaining Limits (Engineering Trade-offs)
+
+These are intentional boundaries at the current scope, not accidental omissions:
+
+- **Idempotency key retention:** keys store a payload fingerprint and are kept indefinitely; automatic expiry/purge is not implemented (`IdempotencyKey.is_expired` documents a 24h freshness window only).
+- **Cost estimates:** token→cost rollups use a fixed per-token rate; demo agents may also emit synthetic token counts.
+- **Evaluator accuracy:** judge scores are persisted and failure-safe, but grading quality against a human baseline is unverified.
+- **Worker crash recovery:** a Huey worker crash mid-task can leave work to be re-enqueued (`eval_pending`); there is no separate lease/heartbeat reclaim path.
+- **In-memory rate limiting:** the ingest rate limiter is process-local and does not survive multi-worker deployment.
+- **Queue backend:** SqlHuey on PostgreSQL is enough here; move to a more elastic queue only when throughput requires it.
+
 ## Production Next Steps
 
-If this were expanded beyond portfolio scope, the next steps would be:
-
-- replace in-memory rate limiting with a shared backend
-- move from SqlHuey to a more elastic queue only when throughput justifies it
-- add tenant-aware auth and isolation for multi-user ingestion
-- extend metrics and dashboards for queue latency and evaluator health
-- add retention and archival policies for long-lived telemetry data
-
-I intentionally did **not** build those here: at demo scale they would add operational surface without adding correctness or clarity.
+- shared-backend rate limiting
+- tenant-aware auth and isolation for multi-user ingestion
+- metrics/dashboards for queue latency and evaluator health
+- retention and archival policies for long-lived telemetry and idempotency keys
