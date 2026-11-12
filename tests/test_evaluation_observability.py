@@ -154,3 +154,51 @@ def test_structured_logs_include_lifecycle_fields_for_failure():
     assert failed_extra["extra_fields"]["provider"] == "openai"
     assert failed_extra["extra_fields"]["failure_class"] == "RuntimeError"
     assert failed_extra["extra_fields"]["failure_message"] == "provider down"
+
+
+@pytest.mark.django_db
+def test_metric_increment_failures_do_not_change_completed_evaluation():
+    run = _create_completed_run_for_evaluation()
+    with (
+        patch(
+            "core.tasks.metrics.increment_eval_tasks_started",
+            side_effect=RuntimeError("metric down"),
+        ),
+        patch(
+            "core.tasks.metrics.increment_eval_tasks_completed",
+            side_effect=RuntimeError("metric down"),
+        ),
+        patch("core.tasks.create_llm_provider") as mock_factory,
+    ):
+        mock_factory.return_value.create_completion.return_value = json.dumps(
+            {"correctness": 4, "helpfulness": 5, "reasoning": "Grounded."}
+        )
+        evaluate_run.call_local(str(run.trace_id))
+
+    run.refresh_from_db()
+    assert run.evaluation.status == "completed"
+    assert run.evaluation.aggregate_score == Decimal("4.5")
+
+
+@pytest.mark.django_db
+def test_metric_increment_failures_preserve_original_evaluation_failure():
+    run = _create_completed_run_for_evaluation()
+    with (
+        patch(
+            "core.tasks.metrics.increment_eval_tasks_started",
+            side_effect=RuntimeError("metric down"),
+        ),
+        patch(
+            "core.tasks.metrics.increment_eval_tasks_failed",
+            side_effect=RuntimeError("metric down"),
+        ),
+        patch("core.tasks.create_llm_provider") as mock_factory,
+    ):
+        mock_factory.return_value.create_completion.side_effect = RuntimeError(
+            "provider unavailable"
+        )
+        evaluate_run.call_local(str(run.trace_id))
+
+    run.refresh_from_db()
+    assert run.evaluation.status == "failed"
+    assert run.evaluation.error_message == "provider unavailable"

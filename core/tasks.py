@@ -42,6 +42,13 @@ def _elapsed_ms(start: datetime, end: datetime) -> int:
     return max(0, int((end - start).total_seconds() * 1000))
 
 
+def _increment_metric_safely(metric_name: str, increment: Callable[[], Any]) -> None:
+    try:
+        increment()
+    except Exception:
+        logger.exception("Evaluation metric increment failed", extra={"metric": metric_name})
+
+
 @dataclass
 class _SpanContent:
     user_query: str
@@ -50,15 +57,20 @@ class _SpanContent:
 
 
 def _extract_span_content(spans: list[Span]) -> _SpanContent:
-    """Walk spans to extract the user query, final answer, and tool call summaries."""
+    """Walk spans to extract the user query, final answer, and tool call summaries.
+
+    ``final_answer`` is the ``output`` of the last LLM span in ``start_time`` order
+    (ties broken by ``end_time``, then ``span_id``). Intermediate LLM drafts are ignored.
+    """
     user_query = next(
         (s.attributes.get("input", "") for s in spans if s.span_type == "chain"),
         "",
     )
-    final_answer = next(
-        (s.attributes.get("output", "") for s in spans if s.span_type == "llm"),
-        "",
-    )
+    llm_spans = [s for s in spans if s.span_type == "llm"]
+    llm_spans.sort(key=lambda s: (s.start_time, s.end_time, str(s.span_id)))
+    final_answer = ""
+    if llm_spans:
+        final_answer = str(llm_spans[-1].attributes.get("output", "") or "")
     tool_summaries = [
         f"{s.name}: {str(s.attributes.get('output', s.attributes.get('error_message', '')))[:200]}"
         for s in spans
@@ -81,7 +93,7 @@ def evaluate_run(trace_id: UUID) -> None:
         return
 
     started_at = timezone.now()
-    metrics.increment_eval_tasks_started()
+    _increment_metric_safely("eval_tasks_started_total", metrics.increment_eval_tasks_started)
     logger.info(
         "Evaluation started",
         extra={
@@ -97,23 +109,12 @@ def evaluate_run(trace_id: UUID) -> None:
     evaluation, _ = Evaluation.objects.get_or_create(trace_id=run)
     _reset_evaluation(evaluation, prompt_version=prompt_version, started_at=started_at)
 
-    spans = list(run.spans.order_by("start_time"))
-    if not spans:
-        _fail_evaluation(
-            evaluation=evaluation,
-            run=run,
-            started_at=started_at,
-            trace_id=trace_id,
-            prompt_version=prompt_version,
-            provider_name=provider_name,
-            error_message="Run has no spans",
-            failure_class="ValueError",
-        )
-        return
-
-    content = _extract_span_content(spans)
-
     try:
+        spans = list(run.spans.order_by("start_time", "end_time", "span_id"))
+        if not spans:
+            raise ValueError("Run has no spans")
+
+        content = _extract_span_content(spans)
         prompt = get_judge_prompt_v1(
             content.user_query, content.final_answer, content.tool_summaries
         )
@@ -232,7 +233,7 @@ def _complete_evaluation(
     run.eval_score = aggregate_score
     run.save(update_fields=["eval_score"])
 
-    metrics.increment_eval_tasks_completed()
+    _increment_metric_safely("eval_tasks_completed_total", metrics.increment_eval_tasks_completed)
     logger.info(
         "Evaluation completed",
         extra={
@@ -271,7 +272,7 @@ def _fail_evaluation(
     run.eval_score = None
     run.save(update_fields=["eval_score"])
 
-    metrics.increment_eval_tasks_failed()
+    _increment_metric_safely("eval_tasks_failed_total", metrics.increment_eval_tasks_failed)
     logger.warning(
         "Evaluation failed",
         extra={

@@ -23,6 +23,7 @@ from core.models import Run, Span
 from core.serializers import SpanIngestSerializer
 from core.services.exceptions import (
     CompletedRunConflictError,
+    IdempotencyConflictError,
     IdempotentDuplicateError,
     ParentSpanNotFoundError,
     SpanAlreadyExistsError,
@@ -107,8 +108,16 @@ class IngestSpanView(APIView):
                 idempotency_key=idempotency_key,
                 post_ingest_hook=run_hook,
             )
-        except IdempotentDuplicateError:
-            return Response({"span_id": "duplicate"}, status=200)
+        except IdempotentDuplicateError as exc:
+            response_data = {"span_id": exc.span_id}
+            if exc.run_completed:
+                response_data["run_status"] = "completed"
+            return Response(response_data, status=200)
+        except IdempotencyConflictError:
+            return Response(
+                {"error": "idempotency key reused with a different payload"},
+                status=409,
+            )
         except ParentSpanNotFoundError:
             return Response({"error": "parent_span_id not found in trace"}, status=400)
         except SpanAlreadyExistsError:

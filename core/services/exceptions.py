@@ -3,7 +3,16 @@ class IngestionError(Exception):
 
 
 class IdempotentDuplicateError(IngestionError):
-    """Raised when an idempotency key has already been claimed."""
+    """Raised when an idempotency key has already been claimed with the same payload."""
+
+    def __init__(self, message: str, *, span_id: str, run_completed: bool) -> None:
+        super().__init__(message)
+        self.span_id = span_id
+        self.run_completed = run_completed
+
+
+class IdempotencyConflictError(IngestionError):
+    """Raised when an idempotency key is reused with a different payload."""
 
 
 class ParentSpanNotFoundError(IngestionError):
