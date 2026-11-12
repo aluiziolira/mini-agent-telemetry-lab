@@ -42,6 +42,13 @@ def _elapsed_ms(start: datetime, end: datetime) -> int:
     return max(0, int((end - start).total_seconds() * 1000))
 
 
+def _increment_metric_safely(metric_name: str, increment: Callable[[], Any]) -> None:
+    try:
+        increment()
+    except Exception:
+        logger.exception("Evaluation metric increment failed", extra={"metric": metric_name})
+
+
 @dataclass
 class _SpanContent:
     user_query: str
@@ -86,7 +93,7 @@ def evaluate_run(trace_id: UUID) -> None:
         return
 
     started_at = timezone.now()
-    metrics.increment_eval_tasks_started()
+    _increment_metric_safely("eval_tasks_started_total", metrics.increment_eval_tasks_started)
     logger.info(
         "Evaluation started",
         extra={
@@ -226,7 +233,7 @@ def _complete_evaluation(
     run.eval_score = aggregate_score
     run.save(update_fields=["eval_score"])
 
-    metrics.increment_eval_tasks_completed()
+    _increment_metric_safely("eval_tasks_completed_total", metrics.increment_eval_tasks_completed)
     logger.info(
         "Evaluation completed",
         extra={
@@ -265,7 +272,7 @@ def _fail_evaluation(
     run.eval_score = None
     run.save(update_fields=["eval_score"])
 
-    metrics.increment_eval_tasks_failed()
+    _increment_metric_safely("eval_tasks_failed_total", metrics.increment_eval_tasks_failed)
     logger.warning(
         "Evaluation failed",
         extra={
