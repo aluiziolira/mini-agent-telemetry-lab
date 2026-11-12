@@ -151,13 +151,14 @@ A telemetry system is only useful if it behaves predictably when things go wrong
 
 | Failure Mode                              | Behavior                                                                                         | Why It Matters                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Malformed span attributes                 | Rejected with `400` before persistence (including non-integer token fields on any span type)     | Keeps bad payloads out of storage and prevents finalization crashes         |
-| Duplicate ingestion (same key + payload)  | Returns the original span result without a second write                                          | Protects metrics and run history from replay drift                          |
+| Malformed span attributes                 | Rejected with `400` before persistence (including invalid or oversized token fields on any span type)     | Keeps bad payloads out of storage and prevents finalization crashes         |
+| Duplicate ingestion (same key + payload)  | Returns the original span result without a second write, including after 24 hours                                          | Protects metrics and run history from replay drift                          |
 | Idempotency key reused with new payload   | Rejected with `409` conflict                                                                     | Prevents silent acceptance of divergent retries under one key               |
 | New span after run completion             | Rejected with `409`; run row is locked during ingest/finalization                                | Makes completion semantics explicit under concurrent writers                |
 | Post-commit metrics/hook failure          | Logged; ingest still returns success                                                             | Observability side effects must not undo a durable write                    |
 | Telemetry transport / 5xx / 429 from agent| SDK retries with backoff (same idempotency key), then fails open                                 | Observability should not break primary workload execution                   |
 | Evaluation preparation or judge failure   | `Evaluation` status set to `failed` with error details (no stuck `running` state)                | Background failures remain queryable instead of silently disappearing       |
+| Evaluation metrics failure               | Logged; evaluation status and scores remain determined by the judge outcome                       | Counter availability does not change durable results                       |
 | Error spans inside a run                  | Run can still complete and be evaluated                                                          | Real systems degrade; they do not require perfect runs to remain observable |
 
 ## Validated Technical Capabilities
@@ -195,6 +196,8 @@ That side-by-side contrast is the framework-agnostic proof: multiple agent style
 These are intentional boundaries at the current scope, not accidental omissions:
 
 - **Idempotency key retention:** keys store a payload fingerprint and are kept indefinitely; automatic expiry/purge is not implemented (`IdempotencyKey.is_expired` documents a 24h freshness window only).
+- **SDK retry budget:** retries start only within a 2.5-second scheduling budget, with each HTTPX phase timeout capped to the remaining time. Phase limits do not enforce a strict whole-request wall-clock deadline.
+- **Token capacity:** each token field and the finalized run total must fit a signed 32-bit integer; finalization rejects aggregate overflow with `400` and rolls back the final span.
 - **Cost estimates:** token→cost rollups use a fixed per-token rate; demo agents may also emit synthetic token counts.
 - **Evaluator accuracy:** judge scores are persisted and failure-safe, but grading quality against a human baseline is unverified.
 - **Worker crash recovery:** a Huey worker crash mid-task can leave work to be re-enqueued (`eval_pending`); there is no separate lease/heartbeat reclaim path.
