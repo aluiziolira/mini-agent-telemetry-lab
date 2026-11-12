@@ -2,9 +2,9 @@
 
 import json
 import os
-import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import tomllib
 from pathlib import Path
@@ -62,20 +62,21 @@ def import_settings_module(module_name, **overrides):
     env.update(overrides)
 
     pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = str(REPO_ROOT) if not pythonpath else f"{REPO_ROOT}:{pythonpath}"
+    env["PYTHONPATH"] = (
+        str(REPO_ROOT) if not pythonpath else os.pathsep.join([str(REPO_ROOT), pythonpath])
+    )
 
     command = [sys.executable, "-c", SETTINGS_SCRIPT, module_name]
-    if shutil.which("uv"):
-        command = ["uv", "run", "python", "-c", SETTINGS_SCRIPT, module_name]
 
-    completed = subprocess.run(
-        command,
-        cwd="/tmp",
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory() as task_dir:
+        completed = subprocess.run(
+            command,
+            cwd=task_dir,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
 
     stdout = completed.stdout.strip().splitlines()
     if not stdout:
@@ -103,12 +104,12 @@ def test_mypy_django_stubs_uses_pytest_safe_settings_module():
     ("overrides", "expected_fragment"),
     [
         (
-            {"DATABASE_URL": "sqlite:////tmp/contracts.sqlite3", "INGEST_API_KEY": "test-ingest"},
+            {"DATABASE_URL": "sqlite:///contracts.sqlite3", "INGEST_API_KEY": "test-ingest"},
             "DJANGO_SECRET_KEY",
         ),
         (
             {
-                "DATABASE_URL": "sqlite:////tmp/contracts.sqlite3",
+                "DATABASE_URL": "sqlite:///contracts.sqlite3",
                 "DJANGO_SECRET_KEY": "test-secret",
             },
             "INGEST_API_KEY",
@@ -135,7 +136,7 @@ def test_required_startup_configuration_fails_fast(overrides, expected_fragment)
 def test_debug_defaults_to_false_when_env_is_missing():
     result = import_settings_module(
         "telemetry_lab.settings",
-        DATABASE_URL="sqlite:////tmp/contracts.sqlite3",
+        DATABASE_URL="sqlite:///contracts.sqlite3",
         DJANGO_SECRET_KEY="test-secret",
         INGEST_API_KEY="test-ingest",
         ALLOWED_HOSTS="localhost",
@@ -149,7 +150,7 @@ def test_debug_defaults_to_false_when_env_is_missing():
 def test_invalid_debug_value_is_rejected():
     result = import_settings_module(
         "telemetry_lab.settings",
-        DATABASE_URL="sqlite:////tmp/contracts.sqlite3",
+        DATABASE_URL="sqlite:///contracts.sqlite3",
         DJANGO_SECRET_KEY="test-secret",
         INGEST_API_KEY="test-ingest",
         ALLOWED_HOSTS="localhost",
@@ -164,7 +165,7 @@ def test_invalid_debug_value_is_rejected():
 def test_debug_false_requires_allowed_hosts():
     result = import_settings_module(
         "telemetry_lab.settings",
-        DATABASE_URL="sqlite:////tmp/contracts.sqlite3",
+        DATABASE_URL="sqlite:///contracts.sqlite3",
         DJANGO_SECRET_KEY="test-secret",
         INGEST_API_KEY="test-ingest",
         DEBUG="false",
@@ -180,7 +181,7 @@ def test_debug_false_requires_allowed_hosts():
 def test_openai_provider_requires_llm_api_key():
     result = import_settings_module(
         "telemetry_lab.settings",
-        DATABASE_URL="sqlite:////tmp/contracts.sqlite3",
+        DATABASE_URL="sqlite:///contracts.sqlite3",
         DJANGO_SECRET_KEY="test-secret",
         INGEST_API_KEY="test-ingest",
         ALLOWED_HOSTS="localhost",
@@ -195,7 +196,7 @@ def test_openai_provider_requires_llm_api_key():
 def test_unsupported_eval_llm_provider_is_rejected():
     result = import_settings_module(
         "telemetry_lab.settings",
-        DATABASE_URL="sqlite:////tmp/contracts.sqlite3",
+        DATABASE_URL="sqlite:///contracts.sqlite3",
         DJANGO_SECRET_KEY="test-secret",
         INGEST_API_KEY="test-ingest",
         ALLOWED_HOSTS="localhost",
@@ -214,7 +215,7 @@ def test_unsupported_eval_llm_provider_is_rejected():
 )
 def test_placeholder_values_are_rejected_for_required_secrets(key_name):
     env = {
-        "DATABASE_URL": "sqlite:////tmp/contracts.sqlite3",
+        "DATABASE_URL": "sqlite:///contracts.sqlite3",
         "DJANGO_SECRET_KEY": "test-secret",
         "INGEST_API_KEY": "test-ingest",
         "ALLOWED_HOSTS": "localhost",
