@@ -44,7 +44,6 @@ def ingest_span(
     idempotency_key: str | None,
     post_ingest_hook: Callable[[str, PostIngestPayload], None],
 ) -> IngestSpanResult:
-    validate_payload_semantics(data)
     payload_fingerprint = fingerprint_ingest_payload(data)
 
     with transaction.atomic():
@@ -64,6 +63,10 @@ def ingest_span(
             payload_fingerprint=payload_fingerprint,
             span_id=data["span_id"],
         )
+
+        # Existing keys are resolved before the freshness window check. This
+        # keeps legitimate retries stable while still validating new writes.
+        validate_payload_semantics(data)
 
         if run.status == "completed":
             raise CompletedRunConflictError("run already completed")

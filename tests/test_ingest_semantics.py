@@ -1,6 +1,7 @@
 """Characterization tests for ingestion idempotency and completion semantics."""
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -8,7 +9,7 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Run, Span
+from core.models import IdempotencyKey, Run, Span
 
 
 def _ingest(client, *, api_key: str, payload: dict, idempotency_key: str | None = None):
@@ -98,6 +99,65 @@ def test_idempotency_key_with_different_payload_returns_conflict(client, setting
     assert conflict.status_code == 409
     assert conflict.json() == {"error": "idempotency key reused with a different payload"}
     assert Span.objects.filter(trace_id__trace_id=trace_id).count() == span_count
+
+
+@pytest.mark.django_db
+def test_stale_same_key_replay_succeeds_without_writes(client, settings):
+    settings.INGEST_API_KEY = "dev-ingest-key"
+    now = timezone.now()
+    payload = {
+        "span_id": str(uuid.uuid4()),
+        "trace_id": str(uuid.uuid4()),
+        "name": "root",
+        "span_type": "chain",
+        "start_time": now.isoformat(),
+        "end_time": now.isoformat(),
+        "status_code": "OK",
+    }
+    key = "stale-replay-key"
+    assert (
+        _ingest(client, api_key="dev-ingest-key", payload=payload, idempotency_key=key).status_code
+        == 201
+    )
+    count_before = Span.objects.count()
+
+    stale = {
+        **payload,
+        "start_time": (now - timedelta(hours=25)).isoformat(),
+        "end_time": (now - timedelta(hours=25)).isoformat(),
+    }
+    # The timestamp is excluded from the canonical payload? It is included, so
+    # replay the original semantic payload with time passing via patched clock.
+    with patch("core.services.ingestion.timezone.now", return_value=now + timedelta(hours=25)):
+        replay = _ingest(client, api_key="dev-ingest-key", payload=payload, idempotency_key=key)
+    assert replay.status_code == 200
+    assert Span.objects.count() == count_before
+    assert IdempotencyKey.objects.filter(key=key).count() == 1
+
+    stale_conflict = _ingest(client, api_key="dev-ingest-key", payload=stale, idempotency_key=key)
+    assert stale_conflict.status_code == 409
+    assert Span.objects.count() == count_before
+
+
+@pytest.mark.django_db
+def test_new_stale_payload_remains_bad_request(client, settings):
+    settings.INGEST_API_KEY = "dev-ingest-key"
+    stale = timezone.now() - timedelta(hours=25)
+    payload = {
+        "span_id": str(uuid.uuid4()),
+        "trace_id": str(uuid.uuid4()),
+        "name": "root",
+        "span_type": "chain",
+        "start_time": stale.isoformat(),
+        "end_time": stale.isoformat(),
+        "status_code": "OK",
+    }
+    response = _ingest(
+        client, api_key="dev-ingest-key", payload=payload, idempotency_key="new-stale-key"
+    )
+    assert response.status_code == 400
+    assert Span.objects.count() == 0
+    assert not IdempotencyKey.objects.filter(key="new-stale-key").exists()
 
 
 @pytest.mark.django_db
