@@ -54,7 +54,9 @@ class HTTPBackend(TelemetryBackend):
 
     Sends a stable Idempotency-Key per span and retries transport errors plus
     5xx/429 responses with jittered backoff, honoring Retry-After when present.
-    Retries share one wall-clock budget so agent execution is not blocked long.
+    Retry scheduling shares a time budget; each attempt uses the remaining time
+    as its phase timeout. Synchronous HTTPX phase limits are not a strict
+    wall-clock deadline for a whole request.
     """
 
     def __init__(
@@ -81,8 +83,8 @@ class HTTPBackend(TelemetryBackend):
         self._monotonic = monotonic
         self._rng = rng if rng is not None else random.Random()
         # Per-request timeout stays under the overall budget.
-        request_timeout = min(timeout, total_budget_seconds)
-        self.client = httpx.Client(timeout=request_timeout)
+        self._request_timeout = min(timeout, total_budget_seconds)
+        self.client = httpx.Client(timeout=self._request_timeout)
 
     def emit_span(self, span_doc: TelemetrySpanDoc) -> None:
         try:
@@ -112,7 +114,13 @@ class HTTPBackend(TelemetryBackend):
             if remaining <= 0:
                 break
             try:
-                response = self.client.post(url, headers=headers, json=span_doc)
+                # HTTPX timeouts are phase limits, not a hard wall-clock deadline.
+                # Rebuild them for each attempt so a retry cannot inherit the
+                # original configured timeout after earlier attempts consumed time.
+                attempt_timeout = httpx.Timeout(min(self._request_timeout, remaining))
+                response = self.client.post(
+                    url, headers=headers, json=span_doc, timeout=attempt_timeout
+                )
             except httpx.HTTPError as exc:
                 last_error = exc
                 if attempt >= self.max_attempts or not self._sleep_before_retry(

@@ -109,6 +109,28 @@ def test_http_backend_retries_transport_errors() -> None:
     assert len(sleeps) == 2
 
 
+def test_retry_timeout_uses_remaining_budget_and_stops_after_deadline() -> None:
+    clock = {"now": 0.0}
+    timeouts: list[float] = []
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        timeouts.append(request.extensions["timeout"]["connect"])
+        clock["now"] += 0.6
+        return httpx.Response(503, headers={"Retry-After": "0"})
+
+    sleeps: list[float] = []
+    backend = _backend_with_transport(handler, sleeps=sleeps, clock=clock)
+    backend.total_budget_seconds = 1.0
+    backend.emit_span({"span_id": "budget", "trace_id": "trace"})
+    backend.close()
+
+    assert calls["count"] == 2
+    assert timeouts[0] == 1.0
+    assert 0 < timeouts[1] < 0.4
+
+
 def test_http_backend_honors_retry_after_delay() -> None:
     responses = [
         httpx.Response(429, headers={"Retry-After": "1"}),
