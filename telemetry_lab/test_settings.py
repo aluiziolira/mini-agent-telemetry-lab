@@ -11,7 +11,9 @@ from typing import Any, cast
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-os.environ["DATABASE_URL"] = f"sqlite:///{BASE_DIR / 'test.sqlite3'}"
+# Default to SQLite for local/CI unit tests. Set DATABASE_URL to a Postgres
+# DSN (and run with -m postgres) to exercise row-lock concurrency tests.
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{BASE_DIR / 'test.sqlite3'}")
 os.environ.setdefault("DJANGO_SECRET_KEY", "pytest-secret-key")
 os.environ.setdefault("INGEST_API_KEY", "pytest-ingest-key")
 os.environ.setdefault("LLM_API_KEY", "pytest-llm-key")

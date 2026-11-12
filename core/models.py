@@ -124,7 +124,16 @@ class MetricCounter(models.Model):
 
 
 class IdempotencyKey(models.Model):
+    """Stores a claimed ingest idempotency key with its payload fingerprint.
+
+    Retention: rows are kept indefinitely. ``is_expired`` documents a 24h
+    freshness window for operators; automatic expiry/purge is not implemented.
+    """
+
     key = models.CharField(max_length=255, unique=True)
+    payload_fingerprint = models.CharField(max_length=64)
+    span_id = models.UUIDField()
+    run_completed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

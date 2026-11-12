@@ -1,6 +1,9 @@
+import hashlib
+import json
 import logging
-from datetime import timedelta
-from typing import Callable
+from datetime import datetime, timedelta
+from typing import Any, Callable
+from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -9,6 +12,7 @@ from core.metrics import metrics
 from core.models import IdempotencyKey, Run, Span
 from core.services.exceptions import (
     CompletedRunConflictError,
+    IdempotencyConflictError,
     IdempotentDuplicateError,
     ParentSpanNotFoundError,
     SpanAlreadyExistsError,
@@ -20,6 +24,20 @@ from core.validators import ValidationError, validate_span_attributes
 logger = logging.getLogger("telemetry_lab")
 
 
+def _json_default(value: Any) -> str:
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def fingerprint_ingest_payload(data: SpanIngestData) -> str:
+    """Stable SHA-256 fingerprint of the ingest payload for idempotency checks."""
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"), default=_json_default)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def ingest_span(
     *,
     data: SpanIngestData,
@@ -27,6 +45,7 @@ def ingest_span(
     post_ingest_hook: Callable[[str, PostIngestPayload], None],
 ) -> IngestSpanResult:
     validate_payload_semantics(data)
+    payload_fingerprint = fingerprint_ingest_payload(data)
 
     with transaction.atomic():
         run, _ = Run.objects.get_or_create(
@@ -37,8 +56,14 @@ def ingest_span(
                 "start_time": data["start_time"],
             },
         )
+        # Serialize completion checks and late-span rejection against concurrent writers.
+        run = Run.objects.select_for_update().get(pk=run.pk)
 
-        claim_idempotency_key(idempotency_key)
+        claim_idempotency_key(
+            idempotency_key,
+            payload_fingerprint=payload_fingerprint,
+            span_id=data["span_id"],
+        )
 
         if run.status == "completed":
             raise CompletedRunConflictError("run already completed")
@@ -66,6 +91,11 @@ def ingest_span(
             end_time=data["end_time"],
         )
 
+        if idempotency_key:
+            IdempotencyKey.objects.filter(key=idempotency_key).update(
+                run_completed=run_completed,
+            )
+
     try:
         post_ingest_hook(
             "post_ingest",
@@ -86,7 +116,21 @@ def ingest_span(
             },
         )
 
-    metrics.increment_spans_ingested()
+    try:
+        metrics.increment_spans_ingested()
+    except Exception as exc:
+        # Span persistence already committed; metrics must not fail the response.
+        logger.exception(
+            "Post-commit metrics update failed (ingestion unaffected)",
+            extra={
+                "trace_id": str(data["trace_id"]),
+                "span_id": str(data["span_id"]),
+                "extra_fields": {
+                    "failure_class": exc.__class__.__name__,
+                    "failure_message": str(exc),
+                },
+            },
+        )
 
     return {
         "span_id": str(span.span_id),
@@ -94,14 +138,41 @@ def ingest_span(
     }
 
 
-def claim_idempotency_key(idempotency_key: str | None) -> None:
+def claim_idempotency_key(
+    idempotency_key: str | None,
+    *,
+    payload_fingerprint: str,
+    span_id: UUID,
+) -> None:
     if not idempotency_key:
         return
 
     try:
-        IdempotencyKey.objects.create(key=idempotency_key)
+        # Savepoint so a duplicate-key IntegrityError does not abort the outer txn.
+        with transaction.atomic():
+            IdempotencyKey.objects.create(
+                key=idempotency_key,
+                payload_fingerprint=payload_fingerprint,
+                span_id=span_id,
+                run_completed=False,
+            )
     except IntegrityError as exc:
-        raise IdempotentDuplicateError("duplicate idempotency key") from exc
+        existing = IdempotencyKey.objects.filter(key=idempotency_key).first()
+        if existing is None:
+            raise IdempotentDuplicateError(
+                "duplicate idempotency key",
+                span_id=str(span_id),
+                run_completed=False,
+            ) from exc
+        if existing.payload_fingerprint != payload_fingerprint:
+            raise IdempotencyConflictError(
+                "idempotency key reused with a different payload"
+            ) from exc
+        raise IdempotentDuplicateError(
+            "duplicate idempotency key",
+            span_id=str(existing.span_id),
+            run_completed=existing.run_completed,
+        ) from exc
 
 
 def validate_payload_semantics(data: SpanIngestData) -> None:

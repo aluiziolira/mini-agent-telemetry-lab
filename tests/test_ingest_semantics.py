@@ -56,9 +56,48 @@ def test_duplicate_idempotency_key_returns_safe_duplicate_without_second_span(cl
         idempotency_key="dup-key-1",
     )
     assert duplicate.status_code == 200
-    assert duplicate.json() == {"span_id": "duplicate"}
+    assert duplicate.json() == {"span_id": str(span_id)}
     assert Span.objects.filter(span_id=span_id).count() == 1
     assert Span.objects.filter(trace_id__trace_id=trace_id).count() == 1
+
+
+@pytest.mark.django_db
+def test_idempotency_key_with_different_payload_returns_conflict(client, settings):
+    settings.INGEST_API_KEY = "dev-ingest-key"
+    trace_id = uuid.uuid4()
+    now = timezone.now()
+
+    first_payload = {
+        "span_id": str(uuid.uuid4()),
+        "trace_id": str(trace_id),
+        "name": "root",
+        "span_type": "chain",
+        "start_time": now.isoformat(),
+        "end_time": now.isoformat(),
+        "status_code": "OK",
+    }
+    first = _ingest(
+        client,
+        api_key="dev-ingest-key",
+        payload=first_payload,
+        idempotency_key="conflict-key-1",
+    )
+    assert first.status_code == 201
+    span_count = Span.objects.filter(trace_id__trace_id=trace_id).count()
+
+    conflict = _ingest(
+        client,
+        api_key="dev-ingest-key",
+        payload={
+            **first_payload,
+            "span_id": str(uuid.uuid4()),
+            "name": "different-root",
+        },
+        idempotency_key="conflict-key-1",
+    )
+    assert conflict.status_code == 409
+    assert conflict.json() == {"error": "idempotency key reused with a different payload"}
+    assert Span.objects.filter(trace_id__trace_id=trace_id).count() == span_count
 
 
 @pytest.mark.django_db
@@ -173,7 +212,19 @@ def test_finalization_totals_are_stable_on_idempotent_retry(client, settings):
     assert run.total_cost == Decimal("0.0000")
     span_count_before_retry = run.spans.count()
 
-    duplicate_final = _ingest(
+    same_payload_retry = _ingest(
+        client,
+        api_key="dev-ingest-key",
+        payload=final_payload,
+        idempotency_key="final-idempotency-key",
+    )
+    assert same_payload_retry.status_code == 200
+    assert same_payload_retry.json() == {
+        "span_id": final_payload["span_id"],
+        "run_status": "completed",
+    }
+
+    conflicting_retry = _ingest(
         client,
         api_key="dev-ingest-key",
         payload={
@@ -182,8 +233,8 @@ def test_finalization_totals_are_stable_on_idempotent_retry(client, settings):
         },
         idempotency_key="final-idempotency-key",
     )
-    assert duplicate_final.status_code == 200
-    assert duplicate_final.json() == {"span_id": "duplicate"}
+    assert conflicting_retry.status_code == 409
+    assert conflicting_retry.json() == {"error": "idempotency key reused with a different payload"}
 
     run.refresh_from_db()
     assert run.status == "completed"
