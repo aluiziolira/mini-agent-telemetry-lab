@@ -7,7 +7,8 @@ import pytest
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Span
+from core.models import IdempotencyKey, Run, Span
+from core.validators import MAX_TOTAL_TOKENS
 
 
 def _ingest(client, *, api_key: str, payload: dict, idempotency_key: str | None = None):
@@ -20,6 +21,79 @@ def _ingest(client, *, api_key: str, payload: dict, idempotency_key: str | None 
         content_type="application/json",
         headers=headers,
     )
+
+
+def _token_payload(*, trace_id, tokens, is_final=False):
+    now = timezone.now().isoformat()
+    return {
+        "span_id": str(uuid.uuid4()),
+        "trace_id": str(trace_id),
+        "name": "token boundary",
+        "span_type": "chain",
+        "start_time": now,
+        "end_time": now,
+        "status_code": "OK",
+        "attributes": {"prompt_tokens": tokens},
+        "is_final": is_final,
+    }
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("tokens", [MAX_TOTAL_TOKENS + 1, 10**100])
+def test_token_field_overflow_rejected_before_persistence(client, settings, tokens):
+    settings.INGEST_API_KEY = "token-test-key"
+    trace_id = uuid.uuid4()
+    response = _ingest(
+        client,
+        api_key=settings.INGEST_API_KEY,
+        payload=_token_payload(trace_id=trace_id, tokens=tokens),
+        idempotency_key="oversized-token",
+    )
+    assert response.status_code == 400
+    assert "prompt_tokens" in response.json()["error"]
+    assert not Run.objects.filter(pk=trace_id).exists()
+    assert not IdempotencyKey.objects.filter(key="oversized-token").exists()
+
+
+@pytest.mark.django_db
+def test_aggregate_overflow_rolls_back_final_span_and_key(client, settings):
+    settings.INGEST_API_KEY = "aggregate-test-key"
+    trace_id = uuid.uuid4()
+    first = _ingest(
+        client,
+        api_key=settings.INGEST_API_KEY,
+        payload=_token_payload(trace_id=trace_id, tokens=MAX_TOTAL_TOKENS),
+    )
+    assert first.status_code == 201
+    response = _ingest(
+        client,
+        api_key=settings.INGEST_API_KEY,
+        payload=_token_payload(trace_id=trace_id, tokens=1, is_final=True),
+        idempotency_key="overflow-final",
+    )
+    assert response.status_code == 400
+    assert "total_tokens" in response.json()["error"]
+    run = Run.objects.get(pk=trace_id)
+    assert run.status == "running"
+    assert run.end_time is None
+    assert run.total_tokens == 0
+    assert run.spans.count() == 1
+    assert not IdempotencyKey.objects.filter(key="overflow-final").exists()
+
+
+@pytest.mark.django_db
+def test_maximum_run_token_total_can_finalize(client, settings):
+    settings.INGEST_API_KEY = "boundary-test-key"
+    trace_id = uuid.uuid4()
+    response = _ingest(
+        client,
+        api_key=settings.INGEST_API_KEY,
+        payload=_token_payload(trace_id=trace_id, tokens=MAX_TOTAL_TOKENS, is_final=True),
+    )
+    assert response.status_code == 201
+    run = Run.objects.get(pk=trace_id)
+    assert run.status == "completed"
+    assert run.total_tokens == MAX_TOTAL_TOKENS
 
 
 @pytest.mark.django_db

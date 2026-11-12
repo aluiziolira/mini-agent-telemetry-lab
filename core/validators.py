@@ -4,9 +4,16 @@ These validators ensure span attributes conform to the expected schema
 for each span_type, enforcing data quality at the ingestion boundary.
 """
 
+from decimal import Decimal
+
 from core.types import SpanAttributes, SpanType
 
 _TOKEN_FIELDS = ("prompt_tokens", "completion_tokens")
+# Run.total_tokens is IntegerField and total_cost is DecimalField(10, 4).
+MAX_TOTAL_TOKENS = 2_147_483_647
+MAX_TOTAL_COST = Decimal("999999.9999")
+# A single token field cannot exceed the run's IntegerField capacity.
+MAX_SPAN_TOKEN_TOTAL = MAX_TOTAL_TOKENS
 
 
 class ValidationError(ValueError):
@@ -25,6 +32,8 @@ def validate_token_fields(attributes: SpanAttributes, *, span_label: str) -> Non
             raise ValidationError(f"{span_label} {field} must be an integer")
         if value < 0:
             raise ValidationError(f"{span_label} {field} must be non-negative")
+        if value > MAX_SPAN_TOKEN_TOTAL:
+            raise ValidationError(f"{span_label} {field} exceeds supported token limit")
 
 
 def validate_span_attributes(span_type: SpanType, attributes: SpanAttributes) -> bool:

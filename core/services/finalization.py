@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Any
 
 from core.models import Run, Span
-from core.validators import ValidationError
+from core.validators import MAX_SPAN_TOKEN_TOTAL, MAX_TOTAL_COST, MAX_TOTAL_TOKENS, ValidationError
 
 # $2.00 per 1M tokens (GPT-4o-mini pricing).
 # In production, this would be provider-specific and configurable via settings.
@@ -17,6 +17,8 @@ def _coerce_token_count(value: Any, *, field_name: str) -> int:
         raise ValidationError(f"{field_name} must be an integer")
     if value < 0:
         raise ValidationError(f"{field_name} must be non-negative")
+    if value > MAX_SPAN_TOKEN_TOTAL:
+        raise ValidationError(f"{field_name} exceeds supported token limit")
     return int(value)
 
 
@@ -41,7 +43,11 @@ def finalize_run_if_needed(*, run: Run, is_final: bool, end_time: datetime) -> b
 
     spans = Span.objects.filter(trace_id=run)
     total_tokens = sum(span_token_total(span.attributes) for span in spans)
+    if total_tokens > MAX_TOTAL_TOKENS:
+        raise ValidationError("run total_tokens exceeds database capacity")
     total_cost = Decimal(total_tokens) * _COST_PER_TOKEN
+    if total_cost > MAX_TOTAL_COST:
+        raise ValidationError("run total_cost exceeds database capacity")
 
     run.status = "completed"
     run.end_time = end_time
