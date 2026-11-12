@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import os
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from decimal import Decimal
+from threading import Event
 from unittest.mock import patch
 
 import pytest
-from django.db import connection, transaction
+from django.db import close_old_connections, connection, connections
 from django.urls import reverse
 from django.utils import timezone
 
@@ -102,80 +103,79 @@ def test_second_final_span_after_completion_is_conflict(client, settings):
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.postgres
-def test_concurrent_finalization_completes_once_under_postgres():
-    """Requires PostgreSQL; skipped on SQLite where row locks are ineffective."""
+@pytest.mark.parametrize("late_is_final", [True, False])
+def test_finalization_serializes_competing_ingest_under_postgres(settings, late_is_final):
     if not _using_postgres():
-        pytest.skip("PostgreSQL required for concurrent finalization locking test")
+        pytest.skip("PostgreSQL required for concurrent ingest locking test")
+    settings.INGEST_API_KEY = "concurrency-test-key"
+    now = timezone.now()
+    run = Run.objects.create(agent_name="concurrent_agent", status="running", start_time=now)
+    first_locked = Event()
+    release_first = Event()
+    second_connected = Event()
+    second_pid = []
 
-    run = Run.objects.create(
-        agent_name="concurrent_agent",
-        status="running",
-        start_time=timezone.now(),
-    )
-    end_a = timezone.now()
-    end_b = end_a + timedelta(milliseconds=5)
+    def held_finalize(**kwargs):
+        # Called by ingestion after acquiring the run row lock and writing its span.
+        first_locked.set()
+        assert release_first.wait(10), "first ingest was not released"
+        return finalize_run_if_needed(**kwargs)
 
-    def finalize_a() -> bool:
-        with transaction.atomic():
-            locked = Run.objects.select_for_update().get(pk=run.pk)
-            return finalize_run_if_needed(run=locked, is_final=True, end_time=end_a)
+    def post_span(name, is_final):
+        from django.test import Client
 
-    def finalize_b() -> bool:
-        with transaction.atomic():
-            locked = Run.objects.select_for_update().get(pk=run.pk)
-            return finalize_run_if_needed(run=locked, is_final=True, end_time=end_b)
+        close_old_connections()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SET lock_timeout = '5s'")
+                if name == "late":
+                    cursor.execute("SELECT pg_backend_pid()")
+                    second_pid.append(cursor.fetchone()[0])
+                    second_connected.set()
+            payload = {
+                "span_id": str(uuid.uuid4()),
+                "trace_id": str(run.pk),
+                "name": name,
+                "span_type": "chain",
+                "status_code": "OK",
+                "start_time": now.isoformat(),
+                "end_time": now.isoformat(),
+                "attributes": {"prompt_tokens": 7 if name == "first" else 99},
+                "is_final": is_final,
+            }
+            return _ingest(Client(), api_key=settings.INGEST_API_KEY, payload=payload).status_code
+        finally:
+            connections.close_all()
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda fn: fn(), [finalize_a, finalize_b]))
+    with patch("core.services.ingestion.finalize_run_if_needed", side_effect=held_finalize):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(post_span, "first", True)
+            try:
+                assert first_locked.wait(10), "first ingest did not acquire the run lock"
+                second = pool.submit(post_span, "late", late_is_final)
+                assert second_connected.wait(10), "second ingest did not connect"
+                deadline = time.monotonic() + 5
+                while True:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT cardinality(pg_blocking_pids(%s))", [second_pid[0]])
+                        blocked = cursor.fetchone()[0] > 0
+                    if blocked:
+                        break
+                    assert time.monotonic() < deadline, (
+                        "second ingest did not block on the row lock"
+                    )
+                    time.sleep(0.01)
+            finally:
+                release_first.set()
+            assert first.result(timeout=10) == 201
+            assert second.result(timeout=10) == 409
 
     run.refresh_from_db()
     assert run.status == "completed"
-    assert results.count(True) >= 1
-    # Under row locking, the second caller observes completed and returns True
-    # without re-applying totals; end_time stays from the first writer.
-    assert run.end_time in {end_a, end_b}
-
-
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.postgres
-def test_concurrent_ingest_final_spans_one_wins_under_postgres(settings):
-    if not _using_postgres():
-        pytest.skip("PostgreSQL required for concurrent ingest locking test")
-    if not os.environ.get("INGEST_API_KEY"):
-        settings.INGEST_API_KEY = "dev-ingest-key"
-
-    trace_id = uuid.uuid4()
-    now = timezone.now()
-
-    def post_final(name: str) -> str:
-        from django.test import Client
-
-        client = Client()
-        response = client.post(
-            reverse("ingest_span"),
-            data={
-                "span_id": str(uuid.uuid4()),
-                "trace_id": str(trace_id),
-                "name": name,
-                "span_type": "chain",
-                "start_time": now.isoformat(),
-                "end_time": now.isoformat(),
-                "status_code": "OK",
-                "is_final": True,
-                "agent_name": "concurrent_agent",
-            },
-            content_type="application/json",
-            headers={"X-API-Key": settings.INGEST_API_KEY},
-        )
-        return str(response.status_code)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        statuses = list(pool.map(post_final, ["final-a", "final-b"]))
-
-    assert sorted(statuses) == ["201", "409"]
-    run = Run.objects.get(trace_id=trace_id)
-    assert run.status == "completed"
-    assert Span.objects.filter(trace_id=run).count() == 1
+    assert run.end_time == now
+    assert run.total_tokens == 7
+    assert run.total_cost == Decimal("0.0000")  # rounded to four decimal places
+    assert list(run.spans.values_list("name", flat=True)) == ["first"]
 
 
 @pytest.mark.django_db
