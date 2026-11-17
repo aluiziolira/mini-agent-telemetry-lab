@@ -11,7 +11,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12"
 ]
 authors = [
-    { name = "Aluizio Lira", email = "alumlira@gmail.com" }
+    { name = "Aluizio Lira", email = "aluizio@aluiziolira.dev" }
 ]
 dependencies = [
     "ddgs>=9.13.0",
